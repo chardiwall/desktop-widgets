@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Desktop Widgets
+Comment=Manage the Ayah reminder, clock and avatar
+Exec=desktop-widget-settings
+Icon=io.github.desktopwidgets.Settings
+Terminal=false
+StartupNotify=true
+Categories=Settings;DesktopSettings;
+Keywords=widget;ayah;clock;avatar;

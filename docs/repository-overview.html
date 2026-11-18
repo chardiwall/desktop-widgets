@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Islamic Desktop Widgets · Repository overview</title>
+<style>
+  :root { color-scheme: light; --paper: #f6f5f3; --surface: #fffefa; --ink: #232224; --muted: #625d5b; --accent: #864215; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--paper); color: var(--ink); font: 1rem/1.5 system-ui, sans-serif; }
+  main { max-width: 62rem; margin: 0 auto; padding: clamp(1rem, 5vw, 3rem); }
+  h1 { font: clamp(2rem, 5vw, 3.5rem)/1.05 Georgia, serif; margin: 0 0 1rem; }
+  p { max-width: 66ch; }
+  figure { margin: 1.5rem 0; }
+  .diagram { overflow-x: auto; border: 1px solid #d7d3ce; border-radius: 8px; background: var(--surface); }
+  .diagram:focus-visible { outline: 2px solid var(--accent); }
+  svg { display: block; width: 100%; min-width: 720px; }
+  rect { fill: var(--surface); stroke: var(--muted); }
+  .focus { fill: #ffedda; stroke: var(--accent); }
+  text { fill: var(--ink); font-size: 16px; font-weight: 650; }
+  .detail { fill: var(--muted); font: 12px ui-monospace, monospace; }
+  .route { fill: none; stroke: var(--muted); stroke-width: 1.5; marker-end: url(#arrow); }
+  figcaption { color: var(--muted); margin-top: .75rem; }
+</style>
+<main>
+  <h1>Islamic Desktop Widgets</h1>
+  <p>The settings app and panel menu control the GNOME desktop widgets. Blender supplies the avatar frames through a separate asset build.</p>
+  <figure>
+    <div class="diagram" tabindex="0" role="region" aria-label="Scrollable repository architecture">
+      <svg viewBox="0 0 800 376" role="img" aria-labelledby="title description">
+        <title id="title">Repository architecture</title>
+        <desc id="description">GTK settings and GNOME panel controls feed the AzClock integration, which displays the Ayah reminder, Clock and Avatar. Blender frames feed the avatar runtime through the asset packer.</desc>
+        <defs>
+          <marker id="arrow" viewBox="0 0 8 8" markerWidth="6" markerHeight="6" refX="8" refY="4" orient="auto">
+            <path d="M0 0 8 4 0 8Z" fill="#625d5b"/>
+          </marker>
+        </defs>
+        <path class="route" d="M232 76 H268 Q276 76 276 84 V112 Q276 120 284 120 H316"/>
+        <path class="route" d="M232 164 H268 Q276 164 276 156 V144 Q276 136 284 136 H316"/>
+        <path class="route" d="M532 112 H560 Q568 112 568 104 V52 Q568 44 576 44 H616"/>
+        <path class="route" d="M532 128 H616"/>
+        <path class="route" d="M532 144 H560 Q568 144 568 152 V200 Q568 208 576 208 H616"/>
+        <path class="route" d="M232 316 H316"/>
+        <path class="route" d="M532 316 H680 Q688 316 688 308 V240"/>
+
+        <rect x="32" y="44" width="200" height="64" rx="6"/>
+        <text x="48" y="72">GTK settings</text><text class="detail" x="48" y="92">desktop_widgets/app.py</text>
+        <rect x="32" y="132" width="200" height="64" rx="6"/>
+        <text x="48" y="160">GNOME panel menu</text><text class="detail" x="48" y="180">indicator.js</text>
+        <rect class="focus" x="316" y="92" width="216" height="72" rx="6"/>
+        <text x="332" y="124">AzClock integration</text><text class="detail" x="332" y="144">GSettings · GNOME Shell</text>
+        <rect x="616" y="12" width="152" height="64" rx="6"/>
+        <text x="632" y="40">Ayah reminder</text><text class="detail" x="632" y="60">Daily verse</text>
+        <rect x="616" y="96" width="152" height="64" rx="6"/>
+        <text x="632" y="124">Clock</text><text class="detail" x="632" y="144">Time and date</text>
+        <rect x="616" y="176" width="152" height="64" rx="6"/>
+        <text x="632" y="204">Avatar</text><text class="detail" x="632" y="224">GNOME renderer</text>
+        <rect x="32" y="284" width="200" height="64" rx="6"/>
+        <text x="48" y="312">Blender</text><text class="detail" x="48" y="332">character/3d/</text>
+        <rect x="316" y="284" width="216" height="64" rx="6"/>
+        <text x="332" y="312">Avatar asset packer</text><text class="detail" x="332" y="332">Frames and motion data</text>
+      </svg>
+    </div>
+    <figcaption>GNOME Shell owns the live widgets. Blender and the asset packer run at build time.</figcaption>
+  </figure>
+</main>
+</html>

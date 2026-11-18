@@ -1,0 +1,152 @@
+#!/usr/bin/env python3
+"""Stage the native avatar pilot against a copy of AzClock 16.1."""
+
+import argparse
+import json
+import math
+from pathlib import Path
+import shutil
+from tempfile import TemporaryDirectory
+
+from PIL import Image, ImageChops, ImageStat
+
+
+ROOT = Path(__file__).resolve().parents[1]
+UUID = "azclock@azclock.gitlab.com"
+MIB = 1024 * 1024
+
+HOOKS = (
+    ("import {UpdateNotification}", "import {AvatarPilot} from './avatar/azclock.js';\n\nimport {UpdateNotification}"),
+    ("        this._oldElementIds = elementIds;\n        this.queue_relayout();",
+     "        this._oldElementIds = elementIds;\n        this.queue_relayout();\n        EXTENSION?._avatarPilot?.refresh();"),
+    ("        this._isDragging = true;",
+     "        this._isDragging = true;\n        EXTENSION?._avatarPilot?.refresh();"),
+    ("        this._isDragging = false;",
+     "        this._isDragging = false;\n        EXTENSION?._avatarPilot?.refresh();"),
+    ("        SETTINGS.connectObject('changed::widgets', () => this._createWidgets(), this);",
+     "        SETTINGS.connectObject('changed::widgets', () => this._createWidgets(), this);\n"
+     "        this._avatarPilot = new AvatarPilot(this);"),
+    ("    disable() {\n",
+     "    disable() {\n        this._avatarPilot?.destroy();\n        this._avatarPilot = null;\n"),
+    ("        this._oldWidgetIds = widgetIds;",
+     "        this._oldWidgetIds = widgetIds;\n        this._avatarPilot?.refresh();"),
+)
+
+
+def frame_bounds(paths):
+    bounds = []
+    for path in paths:
+        with Image.open(path) as frame:
+            if frame.mode != "RGBA" or frame.size != (160, 220):
+                raise ValueError(f"Invalid RGBA avatar frame {path.name}")
+            bounds.append(frame.getchannel("A").getbbox())
+    if any(box is None or box[0] == 0 or box[1] == 0 or box[2] == 160 or box[3] == 220
+           for box in bounds):
+        raise ValueError("An avatar frame is empty or touches the render edge")
+    return bounds
+
+
+def pack_walk(source, destination, listening=None):
+    manifest = json.loads((source / "walk.json").read_text())
+    fps, pivot, travel = (manifest[key] for key in ("fps", "pivot", "travel"))
+    if not (isinstance(fps, int) and 1 <= fps <= 60 and len(pivot) == 2 and
+            3 <= len(travel) <= 240 and all(math.isfinite(v) for v in (*pivot, *travel)) and
+            travel[0] == travel[-1] == 0 and min(travel) == 0 and max(travel) > 0):
+        raise ValueError("Invalid walk timing, pivot or travel path")
+
+    paths = sorted(source.glob("*.png"))
+    if [path.name for path in paths] != [f"{i:04}.png" for i in range(1, len(travel) + 1)]:
+        raise ValueError("Walk frame numbers do not match the manifest")
+    bounds = frame_bounds(paths)
+    if any(abs(box[3] - pivot[1]) > 1 for box in bounds):
+        raise ValueError("A walk frame loses vertical ground contact")
+
+    listening_paths, listening_bounds, leisure = [], [], None
+    if listening:
+        leisure = json.loads((listening / "listening.json").read_text())
+        listening_paths = sorted(listening.glob("*.png"))
+        anchors = leisure["anchors"]
+        if not (1 <= leisure["fps"] <= 60 and 0 < leisure["seated"] < len(anchors) <= 120 and
+                [p.name for p in listening_paths] == [f"{i:04}.png" for i in range(1, len(anchors) + 1)] and
+                all(len(anchor[name]) == 2 and all(math.isfinite(v) for v in anchor[name])
+                    for anchor in anchors for name in ("head", "hand"))):
+            raise ValueError("Invalid listening frame manifest")
+        listening_bounds = frame_bounds(listening_paths)
+        if listening_bounds[0] != bounds[0]:
+            raise ValueError("The listening transition must start at the walk's rest pose")
+    all_bounds = bounds + listening_bounds
+    box = tuple(reduce(bound[i] for bound in all_bounds)
+                for i, reduce in enumerate((min, min, max, max)))
+    x0, y0, x1, y1 = box
+    width, height = x1 - x0, y1 - y0
+    if width * height * 4 * (len(paths) + len(listening_paths)) > 12 * MIB:
+        raise ValueError("Avatar clips are too large for the 24 MiB working budget")
+    pivot = [pivot[0] - x0, pivot[1] - y0]
+    if not (0 < pivot[0] < width and 0 < pivot[1] <= height + 1):
+        raise ValueError("Walk pivot is outside the packed frame")
+
+    with Image.open(paths[0]) as first, Image.open(paths[-1]) as last:
+        # Separate EEVEE runs can vary slightly in colour even at the same pose.
+        difference = ImageChops.difference(first, last)
+        if bounds[0] != bounds[-1] or max(ImageStat.Stat(difference).mean) > 0.1:
+            raise ValueError("The walk must end in its original standing pose")
+
+    with Image.open(paths[0]) as frame:
+        (destination / "rest.rgba").write_bytes(frame.crop(box).tobytes())
+    with (destination / "walk.rgba").open("wb") as pixels:
+        for path in paths[1:-1]:
+            with Image.open(path) as frame:
+                pixels.write(frame.crop(box).tobytes())
+    if leisure:
+        for anchor, frame_box in zip(leisure["anchors"], listening_bounds):
+            anchor["ground"] = frame_box[3] - bounds[0][3]
+            for name in ("head", "hand"):
+                anchor[name][0] -= x0
+                anchor[name][1] -= y0
+        with (destination / "listening.rgba").open("wb") as pixels:
+            for path in listening_paths[1:]:
+                with Image.open(path) as frame:
+                    pixels.write(frame.crop(box).tobytes())
+    manifest.update(width=width, height=height, pivot=pivot)
+    (destination / "walk-data.js").write_text(
+        f"export const walk = {json.dumps(manifest)};\nexport const listening = {json.dumps(leisure)};\n")
+    packed = len(paths) - 1 + max(0, len(listening_paths) - 1)
+    print(f"Packed {packed} frame slots at {width} × {height}, "
+          f"{width * height * 4 * packed / MIB:.2f} MiB of RGBA")
+
+
+def stage(source, walk, output, listening=None):
+    output = output.parent.resolve() / output.name
+    metadata = json.loads((source / "metadata.json").read_text())
+    if metadata.get("uuid") != UUID or metadata.get("version-name") != "16.1":
+        raise ValueError("The avatar pilot requires AzClock 16.1")
+    if output.exists() or output.is_symlink() or output.is_relative_to(source):
+        raise ValueError("Choose a new output directory outside the AzClock installation")
+
+    extension = (source / "extension.js").read_text()
+    for match, replacement in HOOKS:
+        if extension.count(match) != 1:
+            raise ValueError(f"AzClock source no longer matches expected hook: {match.strip()}")
+        extension = extension.replace(match, replacement, 1)
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with TemporaryDirectory(dir=output.parent, prefix=".avatar-stage-") as temp:
+        candidate = Path(temp) / UUID
+        shutil.copytree(source, candidate)
+        (candidate / "extension.js").write_text(extension)
+        shutil.copytree(ROOT / "avatar", candidate / "avatar", ignore=shutil.ignore_patterns("__pycache__"))
+        pack_walk(walk, candidate / "avatar", listening)
+        candidate.rename(output)
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("azclock", type=Path)
+    parser.add_argument("walk", type=Path)
+    parser.add_argument("output", type=Path)
+    parser.add_argument("--listening", type=Path)
+    args = parser.parse_args()
+    try:
+        stage(args.azclock.resolve(), args.walk.resolve(), args.output.absolute(), args.listening)
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        parser.exit(1, f"Cannot stage avatar pilot: {error}\n")

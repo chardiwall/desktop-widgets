@@ -1,0 +1,21 @@
+<schemalist>
+  <schema id="io.github.desktopwidgets.Settings" path="/io/github/desktopwidgets/settings/">
+    <key name="shell-session" type="s">
+      <default>''</default>
+      <summary>GNOME Shell session that owns temporary visibility state</summary>
+    </key>
+    <key name="session-mode" type="s">
+      <choices>
+        <choice value="running"/>
+        <choice value="hidden"/>
+        <choice value="stopped"/>
+      </choices>
+      <default>'running'</default>
+      <summary>Visibility mode for the widget session</summary>
+    </key>
+    <key name="resume-legacy-avatar" type="b">
+      <default>false</default>
+      <summary>Resume the avatar service if it was stopped by Quit</summary>
+    </key>
+  </schema>
+</schemalist>

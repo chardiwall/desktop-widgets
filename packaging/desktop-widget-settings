@@ -1,0 +1,8 @@
+#!/usr/bin/python3
+import sys
+
+sys.path.insert(0, "/usr/lib/desktop-widget-settings")
+
+from desktop_widgets.app import main
+
+raise SystemExit(main())

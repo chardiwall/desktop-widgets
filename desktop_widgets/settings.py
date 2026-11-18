@@ -3,26 +3,14 @@
 from dataclasses import asdict, dataclass, replace
 import re
 
+from .widgets.ayah.themes import THEMES as AYAH_THEMES
+from .widgets.clock.themes import THEMES as CLOCK_THEMES
+
 WIDGETS = {"ayah": "Ayah reminder", "clock": "Clock", "avatar": "Avatar"}
 STYLES = ("Glass", "Solid", "Minimal")
 COLORS = ("text", "accent", "background")
 THEME_FIELDS = ("style", *COLORS, "font")
-THEMES = {
-    "ayah": {
-        "Lantern": ("Solid", "#fff0d7", "#ffbc72", "#191a24", "DejaVu Serif"),
-        "Blueprint": ("Glass", "#e5f0ff", "#88d9fa", "#1c2a34", "Ubuntu Sans"),
-        "Oasis": ("Glass", "#edf8e6", "#9dd8b3", "#263628", "DejaVu Serif"),
-        "Warm Earth": ("Solid", "#322119", "#b25e3d", "#f3e5d6", "Liberation Serif"),
-        "Graphite": ("Minimal", "#f5f1ed", "#ad98ce", "#25232b", "Ubuntu Sans"),
-    },
-    "clock": {
-        "Lantern": ("Solid", "#fff0d7", "#d7b45d", "#161c29", "DejaVu Serif"),
-        "Blueprint": ("Glass", "#e5f0ff", "#88d9fa", "#1c2a34", "DejaVu Sans Mono"),
-        "Oasis": ("Glass", "#edf8e6", "#9dd8b3", "#263628", "Ubuntu Sans"),
-        "Warm Earth": ("Solid", "#322119", "#b25e3d", "#f3e5d6", "Liberation Serif"),
-        "Afterglow": ("Minimal", "#ffeada", "#ff996d", "#482c44", "Ubuntu Sans"),
-    },
-}
+THEMES = {"ayah": AYAH_THEMES, "clock": CLOCK_THEMES}
 
 
 def theme_preview(widget, name, card):

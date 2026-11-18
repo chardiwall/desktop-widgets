@@ -3,13 +3,17 @@ set -eu
 
 cd "$(dirname "$0")/.."
 uuid=azclock@azclock.gitlab.com
-data="$(pwd)/dist/avatar-pilot"
+data=${1:-"$(pwd)/dist/avatar-pilot"}
 extension="$data/gnome-shell/extensions/$uuid"
-if [ ! -f "$extension/avatar/walk.rgba" ]; then
+if [ ! -f "$extension/desktop-widget-settings/desktop_widgets/widgets/avatar/walk.rgba" ]; then
     echo "Stage the avatar pilot before opening the preview." >&2
     exit 1
 fi
 
+sh packaging/build-native.sh
+install -m 755 dist/native/avatar-audio "$extension/desktop-widget-settings/desktop_widgets/widgets/avatar/avatar-audio"
+export GI_TYPELIB_PATH="$(pwd)/dist/native${GI_TYPELIB_PATH:+:$GI_TYPELIB_PATH}"
+export LD_LIBRARY_PATH="$(pwd)/dist/native${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 preview=$(mktemp -d)
 trap 'rm -rf "$preview"' EXIT
 export XDG_CONFIG_HOME="$preview/config" XDG_CACHE_HOME="$preview/cache" XDG_STATE_HOME="$preview/state"

@@ -1,28 +1,31 @@
 # Islamic Desktop Widgets
 
-Three widgets for Ubuntu GNOME. The **Ayah reminder** shows a daily Qur’an verse in Arabic with an English translation. The **Clock** shows the time and date. The **Avatar** is an animated desktop character that can stand on the clock or use its own placement.
+Three widgets for Ubuntu GNOME. The **Ayah reminder** shows a daily Qur’an verse in Arabic with an English translation. The **Clock** shows the time and date. The **Avatar** can stand and walk on the clock, fall back to its own desktop position, and react to music or Qur’an playback.
 
 ## How it fits together
 
-The GTK settings app changes visibility, card themes and placement through the GNOME host. The panel menu provides quick controls. AzClock renders the configured widgets in GNOME Shell, so they stay visible after the settings app closes. Blender renders the avatar frames offline, and the packaging scripts prepare them for the Shell runtime.
+The GTK settings app changes visibility, card themes and placement through one desktop bridge. The GNOME implementation uses GSettings and AzClock 16.1. AzClock keeps the widgets visible after settings closes. Blender renders the avatar frames offline. The packaging tools crop and pack them for the GNOME renderer, which uses C++ for motion and launches a C++ audio player on demand.
 
-[Open the architecture diagram](docs/repository-overview.html)
+[![Architecture diagram showing the settings app and panel menu feeding one shared GNOME bridge for Ayah reminder, Clock, and Avatar](docs/repository-overview.svg)](docs/repository-overview.html)
 
 | Directory | Contents |
 | --- | --- |
-| `desktop_widgets/` | Settings app, card preferences, session controls and GNOME integration |
-| `avatar/` | Avatar motion, Shell rendering, rain effects and audio player |
-| `character/3d/` | Blender model, rig, actions and rendered clips |
-| `packaging/` | Ubuntu package, avatar asset staging and isolated preview |
-| `tests/` | Settings, host integration and animation checks |
+| `desktop_widgets/widgets/ayah/` | Ayah reminder theme presets |
+| `desktop_widgets/widgets/clock/` | Clock theme presets |
+| `desktop_widgets/widgets/avatar/` | Motion, music and Qur’an playback |
+| `desktop_widgets/bridge/` | Shared GNOME/AzClock integration, panel, placement and rendering |
+| `desktop_widgets/app.py` | GTK settings window and commands |
+| `character/3d/` | Blender scene, rig, actions and offline renders |
+| `packaging/` and `tests/` | Ubuntu package, preview and verification |
 
-## Build and check
+## Build and install
 
-The settings package targets an existing local **AzClock 16.1** setup. It uses GTK 4, libadwaita and PyGObject. See the [GNOME integration notes](docs/desktop-widget-settings-plan.md) for host assumptions and the [avatar pilot guide](docs/avatar-pilot.md) for Blender rendering and the nested Shell preview.
+Build on Ubuntu with Blender 5, Python 3 with Pillow and PyGObject, a C++20 compiler, pkg-config, GObject Introspection, GTK 4 and GStreamer development files. Render the walk and listening frames using the [avatar build guide](docs/avatar-pilot.md). Then run:
 
 ```sh
 sh packaging/build-deb.sh
-/usr/bin/python3 -m unittest discover -s tests -v
-gjs -m tests/widget-attachments.js
-gjs -m tests/avatar-motion.js
+sudo apt install "./dist/desktop-widget-settings_0.4.0_$(dpkg --print-architecture).deb"
+desktop-widget-settings --install-gnome-integration
 ```
+
+The last command backs up a local AzClock 16.1 installation and transfers ownership from the legacy desktop avatar service. Log out and back in to load the bridge. The GNOME configuration needs the existing widget IDs `ayah/verse`, `clock/card` and `avatar/body`. For development, use the [isolated preview and checks](docs/avatar-pilot.md#verification).

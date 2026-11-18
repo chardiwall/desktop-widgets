@@ -5,8 +5,8 @@ from pathlib import Path
 
 from gi.repository import Gio
 
-from desktop_widgets.gnome import HostError
-from desktop_widgets.session import Session
+from desktop_widgets.bridge.gnome import HostError
+from desktop_widgets.bridge.session import Session
 
 SCHEMA = Path(__file__).resolve().parents[1] / "packaging/io.github.desktopwidgets.Settings.gschema.xml"
 

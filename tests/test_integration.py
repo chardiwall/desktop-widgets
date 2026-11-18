@@ -1,16 +1,23 @@
 import unittest
 
-from desktop_widgets.gnome import HostError
-from desktop_widgets.integration import HOOKS, PANEL_MARKER, patch_extension
+from desktop_widgets.bridge.gnome import HostError
+from desktop_widgets.bridge.integration import AVATAR_HOOKS, HOOKS, PANEL_MARKER, patch_extension
 
 
 class IntegrationPatchTest(unittest.TestCase):
     def test_integration_applies_once_and_refuses_ambiguous_hooks(self):
-        source = "\n".join(before for before, _ in HOOKS) + "\n        this._syncClockTimerToNearestSecond();"
+        base = [before for before, _ in HOOKS]
+        avatar = [before for before, _ in AVATAR_HOOKS if not any(before in hook for hook in base)]
+        source = "\n".join(base + avatar)
+        source += "\n        this._syncClockTimerToNearestSecond();"
         patched = patch_extension(source)
         self.assertEqual(patch_extension(patched), patched)
         self.assertIn("this._widgetAttachments = new WidgetAttachments(this);", patched)
         self.assertIn(PANEL_MARKER, patched)
         self.assertIn("this._widgetIndicator?.displayedWidgets(widgetIds)", patched)
+        self.assertIn("this._avatarPilot = new AvatarPilot(this);", patched)
+        self.assertIn("this._avatarPilot?.destroy();", patched)
+        legacy = patched.replace("/bridge/attachments.js", "/attachments.js")
+        self.assertEqual(patch_extension(legacy), patched)
         with self.assertRaises(HostError):
             patch_extension(source + "\n" + HOOKS[0][0])

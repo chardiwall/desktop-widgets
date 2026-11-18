@@ -1,7 +1,8 @@
 import Pango from 'gi://Pango';
 import PangoCairo from 'gi://PangoCairo';
+import {measureTrack} from '../desktop_widgets/bridge/track.js';
 
-import {listeningFrame, measureTrack, overlaps, placeOnTrack, sampleWalk} from '../avatar/motion.js';
+import {listeningFrame, overlaps, placeOnTrack, sampleWalk} from '../desktop_widgets/widgets/avatar/motion.js';
 
 function check(condition, message) {
     if (!condition)

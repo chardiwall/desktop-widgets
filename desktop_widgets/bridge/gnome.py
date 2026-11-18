@@ -8,7 +8,7 @@ import re
 
 from gi.repository import Gio, GLib
 
-from .settings import Card, validate_card
+from ..settings import Card, validate_card
 
 SCHEMA = "org.gnome.shell.extensions.azclock"
 PATH = "/org/gnome/shell/extensions/azclock/"
@@ -96,6 +96,10 @@ class AzClockHost:
                 source = Gio.SettingsSchemaSource.new_from_directory(str(schemas), None, False)
                 return cls(source)
         raise HostError("Install the Desktop Widgets extension for GNOME, then reopen this app.")
+
+    def watch_visibility(self, listener):
+        handler = self.root.connect("changed::widgets", lambda *_: listener())
+        return lambda: self.root.disconnect(handler)
 
     def _settings(self, schema_id, path=None):
         schema = self.source.lookup(schema_id, False)
@@ -301,8 +305,8 @@ class AzClockHost:
         return key, position
 
     def place(self, name, display, position):
-        if name == "avatar" or name not in self.visibility():
-            raise HostError("Placement is available for configured Ayah and Clock cards.")
+        if name not in self.visibility():
+            raise HostError("Placement is available for configured widgets.")
         if position not in ANCHORS:
             raise HostError("Choose a supported anchor position.")
         index = next((index for key, _, index in self.displays() if key == display), None)

@@ -1,10 +1,11 @@
 """Start and stop the managed widget session without replacing widget preferences."""
 
+from pathlib import Path
 import subprocess
 
-from gi.repository import Gio
+from gi.repository import Gio, GLib
 
-from .gnome import HostError
+from .gnome import EXTENSION, HostError
 
 APP_ID = "io.github.desktopwidgets.Settings"
 MODE = "session-mode"
@@ -12,6 +13,10 @@ RESTORE_AVATAR = "resume-legacy-avatar"
 
 
 def _legacy_avatar(operation):
+    directory = Path(GLib.get_user_data_dir()) / "gnome-shell/extensions" / EXTENSION
+    entry = directory / "extension.js"
+    if entry.is_file() and "import {AvatarPilot}" in entry.read_text():
+        return False
     result = subprocess.run(
         ["systemctl", "--user", operation, "desk-avatar.service"],
         text=True, capture_output=True, timeout=8,
@@ -34,6 +39,13 @@ class Session:
         source = Gio.SettingsSchemaSource.get_default()
         schema = source.lookup(APP_ID, True) if source else None
         return cls(Gio.Settings.new_full(schema, None, None)) if schema else None
+
+    def watch_stopped(self, listener):
+        def changed(settings, _):
+            if settings.get_string(MODE) == "stopped":
+                listener()
+
+        self.settings.connect("changed::" + MODE, changed)
 
     def _set_state(self, mode, restore_avatar):
         self.settings.delay()

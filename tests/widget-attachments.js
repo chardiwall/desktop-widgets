@@ -1,5 +1,5 @@
 import GLib from 'gi://GLib';
-import {WidgetAttachments, avatarPosition, cordPosition, displayedWidgets, sessionWidgets} from '../desktop_widgets/attachments.js';
+import {WidgetAttachments, avatarPosition, cordPosition, displayedWidgets, sessionWidgets} from '../desktop_widgets/bridge/attachments.js';
 
 function equal(actual, expected) {
     if (JSON.stringify(actual) !== JSON.stringify(expected))

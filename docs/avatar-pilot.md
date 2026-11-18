@@ -1,6 +1,6 @@
 # Ubuntu avatar pilot
 
-This first slice adds a native avatar renderer to a staged copy of AzClock 16.1 on GNOME Shell 50. It uses the configured `clock/card` and `avatar/body` identifiers. The avatar stands on the measured progress stroke, walks out and back when enough space is clear, and uses the existing avatar placement as a still fallback. Click the avatar to request a walk or pause random walks. Automatic walks use a 60–180 second rest interval and honour GNOME's animation preference.
+The avatar renderer runs in AzClock 16.1 on GNOME Shell 50. The standard Ubuntu package integrates it through the shared GNOME bridge, and the staged copy provides an isolated development preview. It uses the configured `clock/card` and `avatar/body` identifiers. The avatar stands on the measured progress stroke, walks out and back when enough space is clear, and uses the existing avatar placement as a still fallback. Click the avatar to request a walk or pause random walks. Automatic walks use a 60–180 second rest interval and honour GNOME's animation preference.
 
 ## Listening and rain
 
@@ -10,7 +10,7 @@ Music and recitation use one player process and the same listening animation. Th
 
 ## Build and preview
 
-From the repository root, run the following with Blender 5 and Python with Pillow. Playback uses the Ubuntu GTK 4 and GStreamer bindings and installed audio codecs. Use a new render directory for a different scene or walk. The shipped Blender scene is read-only input.
+From the repository root, run the following with Blender 5 and Python with Pillow. The C++ player uses GTK 4 and GStreamer. Building it requires the corresponding development packages and GObject Introspection tools. Playback uses the installed audio codecs. Use a new render directory for a different scene or walk. The shipped Blender scene is read-only input.
 
 ```sh
 blender -b character/3d/character_animated.blend -t 3 --python-exit-code 1 \
@@ -29,12 +29,18 @@ The preview starts a nested GNOME Shell using temporary settings and a sample cl
 ## Verification
 
 ```sh
-gjs -m tests/avatar-motion.js
 /usr/bin/python3 -m unittest discover -s tests -v
+gjs -m tests/widget-attachments.js
+sh packaging/build-native.sh
+GI_TYPELIB_PATH="$PWD/dist/native" LD_LIBRARY_PATH="$PWD/dist/native" gjs -m tests/avatar-motion.js
+c++ -std=c++20 $(pkg-config --cflags gstreamer-1.0) tests/avatar-media.cpp \
+  desktop_widgets/widgets/avatar/media.cpp -o dist/native/test-avatar-media \
+  $(pkg-config --libs gstreamer-1.0)
+dist/native/test-avatar-media
 ```
 
 The motion check exercises shaped Arabic and Latin text, missing and narrow tracks, work-area and window overlap, missed animation callbacks, and playback of the seated transition. Staging validates the numbered frames, alpha bounds, ground baseline, neutral closing pose and texture budget. The listening pose shares the standing texture.
 
 In the nested preview, request a walk, play a local file and a surah, toggle rain during each state, and cover and uncover the clock. Check the props follow the moving pose, that rain remains clipped to the card, and that pause returns to standing only when rain is off. Test input through the margins, GNOME Reduced Motion, and repeated disable/enable. Profile the real session only after this check passes. [GNOME development session](https://gjs.guide/extensions/development/debugging.html) · [Battery test plan](avatar-resource-estimate.md#first-measurement-gate)
 
-The current pilot uses one fixed-size outfit. It conservatively pauses in background mode when a window intersects the available route. Focus, prayer reminders and further actions follow this slice. Before adopting the staged renderer in the existing desktop, migrate ownership from `desk-avatar.service` so a single player owns avatar placement. [Architecture and activity roster](avatar-architecture.md)
+The current pilot uses one fixed-size outfit. It conservatively pauses in background mode when a window intersects the available route. Focus, prayer reminders and further actions follow this slice. The standard integration disables the legacy `desk-avatar.service` during installation so the GNOME bridge owns avatar placement. [Architecture and activity roster](avatar-architecture.md)

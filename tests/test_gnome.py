@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from gi.repository import Gio, GLib
 
-from desktop_widgets.gnome import AzClockHost, HostError
+from desktop_widgets.bridge.gnome import AzClockHost, HostError
 
 SCHEMA = """<schemalist>
   <schema id="org.gnome.shell.extensions.azclock" path="/org/gnome/shell/extensions/azclock/">
@@ -157,7 +157,7 @@ class AzClockTest(unittest.TestCase):
     def test_clicking_the_pull_cord_keeps_card_transparency_and_width(self):
         self.host.root.set_value("widgets", GLib.Variant("aa{sv}", [*self.entries, entry("thread")]))
         initial = self.host.card("ayah")
-        with tempfile.TemporaryDirectory() as tmp, patch("desktop_widgets.gnome.Path.home", return_value=Path(tmp)):
+        with tempfile.TemporaryDirectory() as tmp, patch("desktop_widgets.bridge.gnome.Path.home", return_value=Path(tmp)):
             home = Path(tmp)
             art = home / ".local/share/desk-light"
             art.mkdir(parents=True)

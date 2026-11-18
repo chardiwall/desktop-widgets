@@ -2,8 +2,8 @@ import Clutter from 'gi://Clutter';
 import GLib from 'gi://GLib';
 import St from 'gi://St';
 
-import {listeningFrame} from './motion.js';
-import {listening} from './walk-data.js';
+import {listeningFrame} from '../widgets/avatar/motion.js';
+import {listening} from '../widgets/avatar/walk-data.js';
 
 const NOTES = ['♪', '♫', '♪'];
 const DROPS = 14;

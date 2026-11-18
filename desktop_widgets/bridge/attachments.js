@@ -1,6 +1,6 @@
 import GLib from 'gi://GLib';
 
-import {measureTrack} from '../avatar/motion.js';
+import {measureTrack} from './track.js';
 
 const OWNERS = {thread: 'ayah', knob: 'ayah', avatar: 'clock'};
 const MANAGED = new Set(['ayah', 'clock', ...Object.keys(OWNERS)]);
@@ -39,6 +39,8 @@ export class WidgetAttachments {
     }
 
     owner(widget) {
+        if (widget._settingsId === 'avatar' && this.extension._avatarPilot)
+            return null;
         return this.extension.widgets.get(OWNERS[widget._settingsId]);
     }
 

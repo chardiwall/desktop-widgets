@@ -10,8 +10,11 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
 import {ListeningScene} from './listening.js';
-import {measureTrack, overlaps, placeOnTrack, sampleWalk} from './motion.js';
-import {listening, walk} from './walk-data.js';
+import {measureTrack} from './track.js';
+import {overlaps, placeOnTrack, sampleWalk} from '../widgets/avatar/motion.js';
+import {listening, walk} from '../widgets/avatar/walk-data.js';
+
+const AVATAR_DIR = Gio.File.new_for_uri(import.meta.url).get_parent().resolve_relative_path('../widgets/avatar');
 
 Gio._promisify(Gio.File.prototype, 'load_bytes_async');
 
@@ -19,6 +22,16 @@ const ROW_BYTES = walk.width * 4;
 const FRAME_BYTES = ROW_BYTES * walk.height;
 const PLAYER_ID = 'io.github.desktopwidgets.Media';
 const PLAYER_PATH = '/io/github/desktopwidgets/Media';
+
+function monitorFor(actor) {
+    if (!actor?.mapped || !actor.has_allocation())
+        return -1;
+    const [x, y] = actor.get_transformed_position();
+    const [width, height] = actor.get_transformed_size();
+    return global.display.get_monitor_index_for_rect(new Mtk.Rectangle({
+        x: Math.round(x), y: Math.round(y), width: Math.ceil(width), height: Math.ceil(height),
+    }));
+}
 
 function upload(bytes) {
     const image = new St.ImageContent();
@@ -98,9 +111,9 @@ export class AvatarPilot {
 
     openPlayer(section) {
         try {
-            const path = this.extension.dir.resolve_relative_path('avatar/media-player.py').get_path();
+            const path = AVATAR_DIR.get_child('avatar-audio').get_path();
             const player = Gio.AppInfo.create_from_commandline(
-                `/usr/bin/python3 ${GLib.shell_quote(path)} ${GLib.shell_quote(section)}`,
+                `${GLib.shell_quote(path)} ${GLib.shell_quote(section)}`,
                 'Avatar audio', Gio.AppInfoCreateFlags.SUPPORTS_STARTUP_NOTIFICATION);
             player.launch([], global.create_app_launch_context(global.get_current_time(), -1));
         } catch (error) {
@@ -189,11 +202,11 @@ export class AvatarPilot {
     update() {
         this.followWindows();
         const {widgets} = this.extension;
-        const clock = widgets.get('clock');
+        const clockWidget = widgets.get('clock');
         const avatar = widgets.get('avatar');
-        const label = clock?._elements.get('card')?.clutter_text;
+        const label = clockWidget?._elements.get('card')?.clutter_text;
         const body = avatar?._elements.get('body');
-        const watched = new Set([clock, avatar, label, body].filter(Boolean));
+        const watched = new Set([clockWidget, avatar, label, body].filter(Boolean));
         for (const object of this.watched ?? []) {
             if (!watched.has(object))
                 this.unwatch(object);
@@ -214,7 +227,9 @@ export class AvatarPilot {
             this.bodyOpacity = body?.opacity;
         }
 
-        const anchor = clock?.mapped ? clock : avatar;
+        const monitor = monitorFor(body);
+        const clock = monitor >= 0 && monitorFor(clockWidget) === monitor ? clockWidget : null;
+        const anchor = clock ?? avatar;
         const parent = anchor?.get_parent();
         const blocked = !avatar?.mapped || !body?.mapped || !parent ||
             Main.sessionMode.isLocked || Main.overview.visible || clock?._isDragging;
@@ -381,7 +396,7 @@ export class AvatarPilot {
     }
 
     async readFrames(name, count, request) {
-        const file = this.extension.dir.resolve_relative_path(`avatar/${name}.rgba`);
+        const file = AVATAR_DIR.get_child(`${name}.rgba`);
         const [bytes] = await file.load_bytes_async(request);
         if (bytes.get_size() !== FRAME_BYTES * count)
             throw new Error(`Unexpected size for avatar ${name} pixels`);

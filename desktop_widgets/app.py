@@ -13,9 +13,7 @@ gi.require_version("Gdk", "4.0")
 gi.require_version("PangoCairo", "1.0")
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk, PangoCairo
 
-from .gnome import ANCHORS, AzClockHost, HostError
-from .integration import install_attachments
-from .session import APP_ID, MODE, Session
+from .bridge import APP_ID, PLACEMENTS, HostError, discover, install_bridge, open_session
 from .settings import CardEditor, STYLES, THEMES, WIDGETS, theme_preview
 
 EXTENSIONS_URL = "https://extensions.gnome.org/extension/5156/desktop-clock/"
@@ -241,7 +239,7 @@ class PlacementPage:
         self.position = None
 
         group = Adw.PreferencesGroup(title="Desktop placement",
-                                     description="Adjust the monitor and anchor for each card.")
+                                     description="Choose the display and anchor for each widget.")
         page.add(group)
         self.apply_button, self.cancel_button = _actions(group, self.apply, self.refresh)
         self.widget = _choice(WIDGETS[name] for name in names)
@@ -258,7 +256,7 @@ class PlacementPage:
                              margin_top=12, margin_bottom=6)
         self.anchors = {}
         previous = None
-        for index, (position, arrow) in enumerate(zip(ANCHORS, ("↖", "↑", "↗", "←", "•", "→", "↙", "↓", "↘"), strict=True)):
+        for index, (position, arrow) in enumerate(zip(PLACEMENTS, ("↖", "↑", "↗", "←", "•", "→", "↙", "↓", "↘"), strict=True)):
             button = Gtk.ToggleButton(label=arrow, tooltip_text=position)
             button.update_property([Gtk.AccessibleProperty.LABEL], [position])
             if previous is not None:
@@ -367,7 +365,7 @@ class SettingsWindow(Adw.ApplicationWindow):
             self.switches[name] = switch
             _row(general, "Show on desktop", switch)
             if name == "avatar":
-                general.set_description("The avatar follows the clock when it is visible.")
+                general.set_description("The avatar can stand on the clock when both are on the same display.")
             else:
                 if name == "ayah" and (cord_visible := host.cord_visible()) is not None:
                     cord = Adw.PreferencesGroup(title="Pull cord")
@@ -382,7 +380,7 @@ class SettingsWindow(Adw.ApplicationWindow):
                 except (HostError, GLib.Error) as exc:
                     general.set_description(str(exc))
 
-        names = [name for name in ("ayah", "clock") if name in visible]
+        names = [name for name in WIDGETS if name in visible]
         page = Adw.PreferencesPage()
         stack.add_titled(page, "placement", "Placement")
         if names:
@@ -391,10 +389,10 @@ class SettingsWindow(Adw.ApplicationWindow):
                           if stack.get_visible_child_name() == "placement" and not placement.displays else None)
         else:
             page.add(Adw.PreferencesGroup(title="Desktop placement",
-                                          description="Configure an Ayah or Clock card to choose its display and position."))
+                                          description="Configure a widget to choose its display and position."))
         if host and self.switches:
-            handler = host.root.connect("changed::widgets", self.refresh_switches)
-            self.connect("close-request", lambda _: host.root.disconnect(handler) or False)
+            disconnect = host.watch_visibility(self.refresh_switches)
+            self.connect("close-request", lambda _: disconnect() or False)
             self.refresh_switches()
 
     def refresh_switches(self, *_):
@@ -430,20 +428,16 @@ class Application(Adw.Application):
 
     def do_startup(self):
         Adw.Application.do_startup(self)
-        self.session = Session.discover()
+        self.session = open_session()
         if self.session:
-            self.session.settings.connect("changed::" + MODE, self.on_mode)
-
-    def on_mode(self, settings, _):
-        if settings.get_string(MODE) == "stopped":
-            self.quit()
+            self.session.watch_stopped(self.quit)
 
     def do_activate(self):
         if window := self.get_active_window():
             window.present()
             return
         try:
-            host = AzClockHost.discover()
+            host = discover()
             message = host.status()
         except (HostError, GLib.Error) as exc:
             host = None
@@ -461,7 +455,7 @@ def main():
     parser = argparse.ArgumentParser(prog="desktop-widget-settings", description="Manage Ayah, Clock and Avatar on GNOME.")
     actions = parser.add_mutually_exclusive_group()
     actions.add_argument("--install-gnome-integration", action="store_true",
-                         help="back up AzClock and install the widget attachment hooks")
+                         help="back up AzClock and install the shared widget bridge and avatar")
     actions.add_argument("--toggle-pull-cord", action="store_true", help=argparse.SUPPRESS)
     actions.add_argument("--set-widget", nargs=2, help=argparse.SUPPRESS)
     actions.add_argument("--quit-widgets", action="store_true", help=argparse.SUPPRESS)
@@ -469,16 +463,16 @@ def main():
     if any(vars(options).values()):
         try:
             if options.install_gnome_integration:
-                install_attachments()
+                install_bridge()
             elif options.toggle_pull_cord:
-                AzClockHost.discover().toggle_light()
+                discover().toggle_light()
             elif options.set_widget:
                 widget, flag = options.set_widget
                 if widget not in WIDGETS or flag not in ("on", "off"):
                     parser.error("Choose a configured widget and on or off.")
-                AzClockHost.discover().set_visible(widget, flag == "on")
+                discover().set_visible(widget, flag == "on")
             else:
-                session = Session.discover()
+                session = open_session()
                 if not session:
                     raise HostError("The Desktop Widgets session settings schema is missing.")
                 session.quit()

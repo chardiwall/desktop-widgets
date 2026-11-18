@@ -7,6 +7,7 @@ import math
 from pathlib import Path
 import shutil
 from tempfile import TemporaryDirectory
+import sys
 
 from PIL import Image, ImageChops, ImageStat
 
@@ -15,22 +16,9 @@ ROOT = Path(__file__).resolve().parents[1]
 UUID = "azclock@azclock.gitlab.com"
 MIB = 1024 * 1024
 
-HOOKS = (
-    ("import {UpdateNotification}", "import {AvatarPilot} from './avatar/azclock.js';\n\nimport {UpdateNotification}"),
-    ("        this._oldElementIds = elementIds;\n        this.queue_relayout();",
-     "        this._oldElementIds = elementIds;\n        this.queue_relayout();\n        EXTENSION?._avatarPilot?.refresh();"),
-    ("        this._isDragging = true;",
-     "        this._isDragging = true;\n        EXTENSION?._avatarPilot?.refresh();"),
-    ("        this._isDragging = false;",
-     "        this._isDragging = false;\n        EXTENSION?._avatarPilot?.refresh();"),
-    ("        SETTINGS.connectObject('changed::widgets', () => this._createWidgets(), this);",
-     "        SETTINGS.connectObject('changed::widgets', () => this._createWidgets(), this);\n"
-     "        this._avatarPilot = new AvatarPilot(this);"),
-    ("    disable() {\n",
-     "    disable() {\n        this._avatarPilot?.destroy();\n        this._avatarPilot = null;\n"),
-    ("        this._oldWidgetIds = widgetIds;",
-     "        this._oldWidgetIds = widgetIds;\n        this._avatarPilot?.refresh();"),
-)
+sys.path.insert(0, str(ROOT))
+from desktop_widgets.bridge.gnome import HostError
+from desktop_widgets.bridge.integration import BUNDLE, BRIDGE_FILES, patch_avatar
 
 
 def frame_bounds(paths):
@@ -123,30 +111,40 @@ def stage(source, walk, output, listening=None):
     if output.exists() or output.is_symlink() or output.is_relative_to(source):
         raise ValueError("Choose a new output directory outside the AzClock installation")
 
-    extension = (source / "extension.js").read_text()
-    for match, replacement in HOOKS:
-        if extension.count(match) != 1:
-            raise ValueError(f"AzClock source no longer matches expected hook: {match.strip()}")
-        extension = extension.replace(match, replacement, 1)
+    extension = patch_avatar((source / "extension.js").read_text())
 
     output.parent.mkdir(parents=True, exist_ok=True)
     with TemporaryDirectory(dir=output.parent, prefix=".avatar-stage-") as temp:
         candidate = Path(temp) / UUID
         shutil.copytree(source, candidate)
         (candidate / "extension.js").write_text(extension)
-        shutil.copytree(ROOT / "avatar", candidate / "avatar", ignore=shutil.ignore_patterns("__pycache__"))
-        pack_walk(walk, candidate / "avatar", listening)
+        bundle = candidate / BUNDLE
+        bridge = bundle / "bridge"
+        avatar = bundle / "widgets/avatar"
+        bridge.mkdir(parents=True, exist_ok=True)
+        avatar.mkdir(parents=True, exist_ok=True)
+        for name in BRIDGE_FILES:
+            shutil.copyfile(ROOT / "desktop_widgets/bridge" / name, bridge / name)
+        shutil.copyfile(ROOT / "desktop_widgets/widgets/avatar/motion.js", avatar / "motion.js")
+        pack_walk(walk, avatar, listening)
         candidate.rename(output)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("azclock", type=Path)
+    parser.add_argument("azclock", type=Path, nargs="?")
     parser.add_argument("walk", type=Path)
     parser.add_argument("output", type=Path)
     parser.add_argument("--listening", type=Path)
+    parser.add_argument("--pack-only", action="store_true")
     args = parser.parse_args()
     try:
-        stage(args.azclock.resolve(), args.walk.resolve(), args.output.absolute(), args.listening)
-    except (OSError, ValueError, KeyError, TypeError) as error:
+        if args.pack_only:
+            args.output.mkdir(parents=True, exist_ok=True)
+            pack_walk(args.walk, args.output, args.listening)
+        else:
+            if args.azclock is None:
+                parser.error("AzClock source is required when staging a preview")
+            stage(args.azclock.resolve(), args.walk.resolve(), args.output.absolute(), args.listening)
+    except (OSError, ValueError, KeyError, TypeError, HostError) as error:
         parser.exit(1, f"Cannot stage avatar pilot: {error}\n")

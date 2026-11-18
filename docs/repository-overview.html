@@ -23,12 +23,12 @@
 </style>
 <main>
   <h1>Islamic Desktop Widgets</h1>
-  <p>The settings app and panel menu control the GNOME desktop widgets. Blender supplies the avatar frames through a separate asset build.</p>
+  <p>The settings app and panel menu control the widgets through one GNOME bridge. Blender supplies the avatar frames through a separate asset build.</p>
   <figure>
     <div class="diagram" tabindex="0" role="region" aria-label="Scrollable repository architecture">
       <svg viewBox="0 0 800 376" role="img" aria-labelledby="title description">
         <title id="title">Repository architecture</title>
-        <desc id="description">GTK settings and GNOME panel controls feed the AzClock integration, which displays the Ayah reminder, Clock and Avatar. Blender frames feed the avatar runtime through the asset packer.</desc>
+        <desc id="description">GTK settings and GNOME panel controls feed the Shared GNOME bridge, which displays the Ayah reminder, Clock and Avatar. Blender frames feed the avatar runtime through the asset packer.</desc>
         <defs>
           <marker id="arrow" viewBox="0 0 8 8" markerWidth="6" markerHeight="6" refX="8" refY="4" orient="auto">
             <path d="M0 0 8 4 0 8Z" fill="#625d5b"/>
@@ -45,15 +45,15 @@
         <rect x="32" y="44" width="200" height="64" rx="6"/>
         <text x="48" y="72">GTK settings</text><text class="detail" x="48" y="92">desktop_widgets/app.py</text>
         <rect x="32" y="132" width="200" height="64" rx="6"/>
-        <text x="48" y="160">GNOME panel menu</text><text class="detail" x="48" y="180">indicator.js</text>
+        <text x="48" y="160">GNOME panel menu</text><text class="detail" x="48" y="180">bridge/indicator.js</text>
         <rect class="focus" x="316" y="92" width="216" height="72" rx="6"/>
-        <text x="332" y="124">AzClock integration</text><text class="detail" x="332" y="144">GSettings · GNOME Shell</text>
+        <text x="332" y="124">Shared GNOME bridge</text><text class="detail" x="332" y="144">GSettings · GNOME Shell</text>
         <rect x="616" y="12" width="152" height="64" rx="6"/>
         <text x="632" y="40">Ayah reminder</text><text class="detail" x="632" y="60">Daily verse</text>
         <rect x="616" y="96" width="152" height="64" rx="6"/>
         <text x="632" y="124">Clock</text><text class="detail" x="632" y="144">Time and date</text>
         <rect x="616" y="176" width="152" height="64" rx="6"/>
-        <text x="632" y="204">Avatar</text><text class="detail" x="632" y="224">GNOME renderer</text>
+        <text x="632" y="204">Avatar</text><text class="detail" x="632" y="224">C++ motion and audio</text>
         <rect x="32" y="284" width="200" height="64" rx="6"/>
         <text x="48" y="312">Blender</text><text class="detail" x="48" y="332">character/3d/</text>
         <rect x="316" y="284" width="216" height="64" rx="6"/>

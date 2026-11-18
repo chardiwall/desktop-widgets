@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 376" role="img" aria-labelledby="title description">
+        <title id="title">Repository architecture</title>
+        <desc id="description">GTK settings and GNOME panel controls feed the Shared GNOME bridge, which displays the Ayah reminder, Clock and Avatar. Blender frames feed the avatar runtime through the asset packer.</desc>
+        <style>
+  :root { color-scheme: light; --paper: #f6f5f3; --surface: #fffefa; --ink: #232224; --muted: #625d5b; --accent: #864215; }
+  rect { fill: var(--surface); stroke: var(--muted); }
+  .focus { fill: #ffedda; stroke: var(--accent); }
+  text { fill: var(--ink); font-size: 16px; font-weight: 650; }
+  .detail { fill: var(--muted); font: 12px ui-monospace, monospace; }
+  .route { fill: none; stroke: var(--muted); stroke-width: 1.5; marker-end: url(#arrow); }
+        text { font-family: system-ui, sans-serif; }
+        </style>
+        <path d="M0 0H800V376H0Z" fill="#fffefa"/>
+        <defs>
+          <marker id="arrow" viewBox="0 0 8 8" markerWidth="6" markerHeight="6" refX="8" refY="4" orient="auto">
+            <path d="M0 0 8 4 0 8Z" fill="#625d5b"/>
+          </marker>
+        </defs>
+        <path class="route" d="M232 76 H268 Q276 76 276 84 V112 Q276 120 284 120 H316"/>
+        <path class="route" d="M232 164 H268 Q276 164 276 156 V144 Q276 136 284 136 H316"/>
+        <path class="route" d="M532 112 H560 Q568 112 568 104 V52 Q568 44 576 44 H616"/>
+        <path class="route" d="M532 128 H616"/>
+        <path class="route" d="M532 144 H560 Q568 144 568 152 V200 Q568 208 576 208 H616"/>
+        <path class="route" d="M232 316 H316"/>
+        <path class="route" d="M532 316 H680 Q688 316 688 308 V240"/>
+
+        <rect x="32" y="44" width="200" height="64" rx="6"/>
+        <text x="48" y="72">GTK settings</text><text class="detail" x="48" y="92">desktop_widgets/app.py</text>
+        <rect x="32" y="132" width="200" height="64" rx="6"/>
+        <text x="48" y="160">GNOME panel menu</text><text class="detail" x="48" y="180">bridge/indicator.js</text>
+        <rect class="focus" x="316" y="92" width="216" height="72" rx="6"/>
+        <text x="332" y="124">Shared GNOME bridge</text><text class="detail" x="332" y="144">GSettings · GNOME Shell</text>
+        <rect x="616" y="12" width="152" height="64" rx="6"/>
+        <text x="632" y="40">Ayah reminder</text><text class="detail" x="632" y="60">Daily verse</text>
+        <rect x="616" y="96" width="152" height="64" rx="6"/>
+        <text x="632" y="124">Clock</text><text class="detail" x="632" y="144">Time and date</text>
+        <rect x="616" y="176" width="152" height="64" rx="6"/>
+        <text x="632" y="204">Avatar</text><text class="detail" x="632" y="224">C++ motion and audio</text>
+        <rect x="32" y="284" width="200" height="64" rx="6"/>
+        <text x="48" y="312">Blender</text><text class="detail" x="48" y="332">character/3d/</text>
+        <rect x="316" y="284" width="216" height="64" rx="6"/>
+        <text x="332" y="312">Avatar asset packer</text><text class="detail" x="332" y="332">Frames and motion data</text>
+      </svg>

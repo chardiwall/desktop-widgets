@@ -1,14 +1,16 @@
 """The desktop host for AzClock on GNOME."""
 
 from dataclasses import replace
-import fcntl
 import json
 from pathlib import Path
 import re
 
-from gi.repository import Gio, GLib
+import gi
 
-from ..settings import Card, validate_card
+gi.require_version("Gdk", "4.0")
+from gi.repository import Gdk, Gio, GLib
+
+from ..settings import CARD_STYLES, Card, validate_card
 
 SCHEMA = "org.gnome.shell.extensions.azclock"
 PATH = "/org/gnome/shell/extensions/azclock/"
@@ -46,15 +48,22 @@ def _location(frame):
     return location if isinstance(location, dict) else {}
 
 
-def _color(value, fallback):
-    if re.fullmatch(r"#[0-9a-fA-F]{6}(?:[0-9a-fA-F]{2})?", value):
-        return value[:7].lower()
-    rgb = re.match(r"rgba?\(\s*(\d+),\s*(\d+),\s*(\d+)[,)]", value)
-    if rgb:
-        channels = [int(channel) for channel in rgb.groups()]
-        if all(0 <= channel <= 255 for channel in channels):
-            return "#" + "".join(f"{channel:02x}" for channel in channels)
-    return fallback
+def _parse_colour(value):
+    colour = Gdk.RGBA()
+    value = value.partition(";")[0].strip()
+    if value.lower() == "transparent":
+        value = "rgba(0,0,0,0)"
+    return colour if colour.parse(value) else None
+
+
+def _channels(colour):
+    return (colour.red * 255, colour.green * 255, colour.blue * 255)
+
+
+def _hex_colour(colour, fallback):
+    if colour is None:
+        return fallback
+    return "#" + "".join(f"{int(channel + 0.5):02x}" for channel in _channels(colour))
 
 
 def _write(*changes):
@@ -122,70 +131,35 @@ class AzClockHost:
                 result[name] = properties.unpack().get("enabled") is True
         return result
 
-    def _set_flags(self, changes):
+    def set_visible(self, name, visible):
+        if name not in self.visibility():
+            raise HostError("This widget is not configured in Desktop Widgets.")
         value = self.root.get_value("widgets")
         entries = _entries(value)
-        indexes = {}
+        widget_index = clock_index = None
+        raise_avatar = name == "avatar" and visible
         for index, entry in enumerate(entries):
-            for name in changes.keys() | {"clock"}:
-                properties = entry.lookup_value(name, DICTIONARY)
-                if properties is None:
-                    continue
-                indexes[name] = index
-                if name in changes and properties.unpack().get("enabled") is not changes[name]:
-                    updated = GLib.VariantDict.new(properties)
-                    updated.insert_value("enabled", GLib.Variant("b", changes[name]))
-                    outer = GLib.VariantDict.new(entries[index])
-                    outer.insert_value(name, updated.end())
-                    entries[index] = outer.end()
-        if changes.keys() - indexes.keys():
+            if raise_avatar and entry.lookup_value("clock", DICTIONARY) is not None:
+                clock_index = index
+            properties = entry.lookup_value(name, DICTIONARY)
+            if properties is None:
+                continue
+            widget_index = index
+            if properties.unpack().get("enabled") is not visible:
+                updated = GLib.VariantDict.new(properties)
+                updated.insert_value("enabled", GLib.Variant("b", visible))
+                outer = GLib.VariantDict.new(entry)
+                outer.insert_value(name, updated.end())
+                entries[index] = outer.end()
+        if widget_index is None:
             raise HostError("A requested widget was removed.")
-        if changes.get("avatar") and "clock" in indexes and indexes["avatar"] > indexes["clock"]:
-            entries.insert(indexes["clock"], entries.pop(indexes["avatar"]))
+        if clock_index is not None and widget_index > clock_index:
+            entries.insert(clock_index, entries.pop(widget_index))
         updated = GLib.Variant.new_array(DICTIONARY, entries)
         if updated != value:
             if not self.root.set_value("widgets", updated):
                 raise HostError("The widget visibility setting could not be saved.")
             Gio.Settings.sync()
-
-    def set_visible(self, name, visible):
-        if name not in self.visibility():
-            raise HostError("This widget is not configured in Desktop Widgets.")
-        self._set_flags({name: visible})
-
-    def cord_visible(self):
-        entries = {name: values for row in self.root.get_value("widgets").unpack() for name, values in row.items()}
-        if not {"knob", "thread"} <= entries.keys():
-            return None
-        return all(entries[name].get("enabled") is True for name in ("knob", "thread"))
-
-    def set_cord_visible(self, visible):
-        if self.cord_visible() is None:
-            raise HostError("The pull cord and switch are not configured.")
-        self._set_flags({"knob": visible, "thread": visible})
-
-    def toggle_light(self):
-        if self.cord_visible() is not True or not self.visibility().get("ayah"):
-            return
-        state = Path.home() / ".config/desk-light/state"
-        state.parent.mkdir(parents=True, exist_ok=True)
-        with (state.parent / "toggle.lock").open("a") as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX)
-            self._toggle_light_locked(state)
-
-    def _toggle_light_locked(self, state):
-        artwork = Path.home() / ".local/share/desk-light"
-        turned_on = not state.exists() or state.read_text().strip() != "on"
-        mode = "on" if turned_on else "off"
-        changes = []
-        for part in ("thread", "knob"):
-            image = artwork / f"{part}-{mode}.svg"
-            if not image.is_file():
-                raise HostError("The existing pull-cord artwork could not be found.")
-            settings = self._settings(SCHEMA + ".element-data", f"{PATH}widget-data/{part}/element-data/{part}/")
-            changes.append((settings, {"image-path": GLib.Variant("s", str(image))}))
-        GLib.file_set_contents(str(state), mode.encode())
-        _write(*changes)
 
     def status(self):
         bus = "org.gnome.Shell.Extensions"
@@ -212,23 +186,23 @@ class AzClockHost:
             raise HostError("This card is not configured in Desktop Widgets.")
         frame, label = self.widget(name), self.element(name)
         defaults = Card()
-        background = frame.get_string("background-color")
+        background = _parse_colour(frame.get_string("background-color"))
         width = CARD_WIDTH.search(label.get_string("background-color"))
         override, font = label.get_value("font-family-override").unpack()
-        if not frame.get_boolean("show-border") or not frame.get_boolean("show-background"):
+        if not frame.get_boolean("show-border"):
             style = "Minimal"
-        elif frame.get_int("border-radius") > 8:
+        elif frame.get_int("border-radius") > CARD_STYLES["Solid"][0]:
             style = "Glass"
         else:
             style = "Solid"
-        alpha = re.match(r"rgba\([^,]+,[^,]+,[^,]+,\s*(0(?:\.\d+)?|1(?:\.0+)?|\.\d+)\s*\)", background)
-        transparency = round(100 * (1 - float(alpha[1]))) if alpha else 0
+        transparency = round(100 * (1 - background.alpha)) if background is not None else 0
         if not frame.get_boolean("show-background"):
             transparency = 100
         return Card(
-            transparency=transparency, style=style, background=_color(background, defaults.background),
-            text=_color(label.get_string("foreground-color"), defaults.text),
-            accent=_color(label.get_string("border-color"), defaults.accent),
+            transparency=transparency, style=style, background=_hex_colour(background, defaults.background),
+            background_readable=background is not None,
+            text=_hex_colour(_parse_colour(label.get_string("foreground-color")), defaults.text),
+            accent=_hex_colour(_parse_colour(label.get_string("border-color")), defaults.accent),
             font=font if override else "", size=label.get_int("font-size"),
             width=int(width[2]) if width else defaults.width,
         )
@@ -236,28 +210,38 @@ class AzClockHost:
     def apply_card(self, name, saved, changes):
         current = self.card(name)
         frame, label = self.widget(name), self.element(name)
-        if any(getattr(current, key) != getattr(saved, key) for key in changes):
+        checked = changes.keys() | ({"background_readable"} if "background" in changes else set())
+        if any(getattr(current, key) != getattr(saved, key) for key in checked):
             raise HostError("This card changed in GNOME. Cancel to reload its current settings.")
         card = replace(current, **changes)
         validate_card(card)
         frame_values = {}
         label_values = {}
-        if {"style", "background", "transparency"} & changes.keys():
-            color = card.background
-            if card.transparency:
-                rgb = [int(color[index:index + 2], 16) for index in (1, 3, 5)]
-                opacity = (100 - card.transparency) / 100
-                color = f"rgba({rgb[0]},{rgb[1]},{rgb[2]},{opacity:.2f})"
-            frame_values["background-color"] = GLib.Variant("s", color)
-            frame_values["show-background"] = GLib.Variant("b", True)
+        if {"background", "transparency"} & changes.keys():
+            original = frame.get_string("background-color")
+            _, separator, declarations = original.partition(";")
+            colour = card.background
+            if "background" not in changes or card.transparency:
+                saved_colour = _parse_colour(card.background if "background" in changes else original)
+                if saved_colour is None:
+                    raise HostError("The saved background colour could not be read. Choose a colour before applying transparency.")
+                rgb = ",".join(f"{channel:.6g}" for channel in _channels(saved_colour))
+                colour = f"rgba({rgb},{card.opacity:.2f})"
+            frame_values["background-color"] = GLib.Variant("s", colour + separator + declarations)
+            if "transparency" in changes:
+                frame_values["show-background"] = GLib.Variant("b", True)
         if "style" in changes:
-            frame_values["show-border"] = GLib.Variant("b", card.style != "Minimal")
-            frame_values["border-radius"] = GLib.Variant("i", {"Glass": 18, "Solid": 8, "Minimal": 2}[card.style])
+            radius, border = CARD_STYLES[card.style]
+            frame_values["show-border"] = GLib.Variant("b", bool(border))
+            frame_values["border-radius"] = GLib.Variant("i", radius)
         if "text" in changes:
             label_values["foreground-color"] = GLib.Variant("s", card.text)
         if "accent" in changes:
             label_values["border-color"] = GLib.Variant("s", card.accent)
         if "font" in changes:
+            # AzClock inserts the family into a double-quoted CSS string.
+            if '"' in card.font or "\\" in card.font:
+                raise HostError("AzClock cannot use this font family name.")
             label_values["font-family-override"] = GLib.Variant("(bs)", (bool(card.font), card.font))
         if "size" in changes:
             label_values["font-size"] = GLib.Variant("i", card.size)
@@ -324,5 +308,6 @@ class AzClockHost:
         _write((frame, {
             "anchor-point": GLib.Variant("s", anchor),
             "location-data": GLib.Variant("s", json.dumps(loc)),
+            "convert-old-location-done": GLib.Variant("b", True),
             "lock-widget": GLib.Variant("b", True),
         }))

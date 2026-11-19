@@ -3,11 +3,11 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
 
 from gi.repository import Gio, GLib
 
 from desktop_widgets.bridge.gnome import AzClockHost, HostError
+from desktop_widgets.settings import CardEditor
 
 SCHEMA = """<schemalist>
   <schema id="org.gnome.shell.extensions.azclock" path="/org/gnome/shell/extensions/azclock/">
@@ -21,6 +21,7 @@ SCHEMA = """<schemalist>
     <key name="border-radius" type="i"><default>18</default></key>
     <key name="anchor-point" type="s"><default>'Top_Left'</default></key>
     <key name="location-data" type="s"><default>'{"monitorIndex":0,"relativeX":0.03,"relativeY":0.05}'</default></key>
+    <key name="convert-old-location-done" type="b"><default>false</default></key>
     <key name="lock-widget" type="b"><default>true</default></key>
   </schema>
   <schema id="org.gnome.shell.extensions.azclock.element-data">
@@ -54,7 +55,7 @@ class AzClockTest(unittest.TestCase):
         self.host = AzClockHost(self.source, Gio.memory_settings_backend_new())
         self.entries = [
             entry("avatar"), entry("clock", position=GLib.Variant("u", 7)),
-            entry("ayah"), entry("knob", detail=GLib.Variant("s", "pull cord")),
+            entry("ayah"), entry("another-widget", detail=GLib.Variant("s", "unrelated widget")),
         ]
         self.host.root.set_value("widgets", GLib.Variant("aa{sv}", self.entries))
         for widget, element in (("avatar", "body"), ("clock", "card"), ("ayah", "verse")):
@@ -104,6 +105,7 @@ class AzClockTest(unittest.TestCase):
         self.host.place("ayah", "HDMI-1", "Top right")
         location = self.host.widget("ayah").get_string("location-data")
         self.assertEqual(json.loads(location), {"monitorIndex": 1, "relativeX": 0.96, "relativeY": 0.06})
+        self.assertTrue(self.host.widget("ayah").get_boolean("convert-old-location-done"))
         self.assertEqual(self.host.position("ayah", self.host.displays()), ("HDMI-1", "Top right"))
 
         self.host.displays = lambda: [("HDMI-1", "Side", 0), ("DP-2", "Wide", 1)]
@@ -129,24 +131,13 @@ class AzClockTest(unittest.TestCase):
         self.host.apply_card("ayah", self.host.card("ayah"), {"width": 720})
         self.assertEqual(label.get_string("background-color"), "#334455; width: 720px")
 
-    def test_pull_cord_switch_changes_both_parts_and_preserves_the_ayah_entry(self):
-        self.host.root.set_value("widgets", GLib.Variant("aa{sv}", [*self.entries, entry("thread")]))
-        self.assertTrue(self.host.cord_visible())
-        self.host.set_cord_visible(False)
-        flags = self.host.root.get_value("widgets").unpack()
-        self.assertEqual({key: value["enabled"] for row in flags for key, value in row.items()},
-                         {"avatar": True, "clock": True, "ayah": True, "knob": False, "thread": False})
-        self.assertFalse(self.host.cord_visible())
-        self.host.set_cord_visible(True)
-        self.assertTrue(self.host.cord_visible())
-
     def test_enabling_avatar_brings_it_in_front_of_the_clock(self):
         self.host.root.set_value("widgets", GLib.Variant("aa{sv}", [
-            entry("clock"), entry("knob"), entry("avatar", False), entry("ayah"),
+            entry("clock"), entry("another-widget"), entry("avatar", False), entry("ayah"),
         ]))
         self.host.set_visible("avatar", True)
         stack = self.host.root.get_value("widgets").unpack()
-        self.assertEqual([next(iter(row)) for row in stack], ["avatar", "clock", "knob", "ayah"])
+        self.assertEqual([next(iter(row)) for row in stack], ["avatar", "clock", "another-widget", "ayah"])
 
     def test_card_transparency_round_trips_without_fading_the_text(self):
         clock = self.host.card("clock")
@@ -154,17 +145,54 @@ class AzClockTest(unittest.TestCase):
         self.assertEqual((updated.style, updated.transparency, updated.text), ("Solid", 67, clock.text))
         self.assertEqual(self.host.widget("clock").get_string("background-color"), "rgba(57,51,62,0.33)")
 
-    def test_clicking_the_pull_cord_keeps_card_transparency_and_width(self):
-        self.host.root.set_value("widgets", GLib.Variant("aa{sv}", [*self.entries, entry("thread")]))
-        initial = self.host.card("ayah")
-        with tempfile.TemporaryDirectory() as tmp, patch("desktop_widgets.bridge.gnome.Path.home", return_value=Path(tmp)):
-            home = Path(tmp)
-            art = home / ".local/share/desk-light"
-            art.mkdir(parents=True)
-            for name in ("thread-on", "thread-off", "knob-on", "knob-off"):
-                (art / f"{name}.svg").touch()
-            self.host.toggle_light()
-            self.assertEqual((home / ".config/desk-light/state").read_text(), "on")
-            self.host.toggle_light()
-            self.assertEqual((home / ".config/desk-light/state").read_text(), "off")
-        self.assertEqual(self.host.card("ayah"), initial)
+    def test_transparency_preserves_native_colours_and_other_declarations(self):
+        frame = self.host.widget("clock")
+        for native, colour, transparency, channels in (
+            ("white", "#ffffff", 0, "255,255,255"),
+            ("#33445580", "#334455", 50, "51,68,85"),
+            ("rgba(12.5,30,45,0.6)", "#0d1e2d", 40, "12.5,30,45"),
+        ):
+            with self.subTest(native=native):
+                frame.set_string("background-color", native + "; box-shadow: none")
+                saved = self.host.card("clock")
+                self.assertEqual((saved.background, saved.transparency), (colour, transparency))
+                updated = self.host.apply_card("clock", saved, {"transparency": 67})
+                self.assertEqual((updated.background, updated.transparency), (colour, 67))
+                self.assertEqual(frame.get_string("background-color"),
+                                 f"rgba({channels},0.33); box-shadow: none")
+
+    def test_unreadable_background_rejects_transparency_edit_before_writing(self):
+        frame = self.host.widget("clock")
+        frame.set_string("background-color", "var(--desktop-background)")
+        saved = self.host.card("clock")
+        with self.assertRaisesRegex(HostError, "saved background colour"):
+            self.host.apply_card("clock", saved, {"transparency": 65, "size": 24})
+        self.assertEqual(frame.get_string("background-color"), "var(--desktop-background)")
+        self.assertEqual(self.host.card("clock").size, saved.size)
+
+    def test_choosing_preview_colour_repairs_an_unreadable_background(self):
+        frame = self.host.widget("clock")
+        frame.set_string("background-color", "var(--desktop-background)")
+        editor = CardEditor("clock", self.host.card("clock"))
+        self.assertFalse(editor.draft.background_readable)
+        editor.edit(background=editor.draft.background)
+        self.assertTrue(editor.dirty)
+        editor.edit(transparency=65)
+        self.assertEqual(editor.changes(), {"background": "#39333e", "transparency": 65})
+        updated = self.host.apply_card("clock", editor.saved, editor.changes())
+        self.assertTrue(updated.background_readable)
+        self.assertEqual(frame.get_string("background-color"), "rgba(57,51,62,0.35)")
+
+    def test_style_change_preserves_native_background(self):
+        frame = self.host.widget("clock")
+        frame.set_string("background-color", "white")
+        updated = self.host.apply_card("clock", self.host.card("clock"), {"style": "Minimal"})
+        self.assertEqual((updated.style, updated.background), ("Minimal", "#ffffff"))
+        self.assertEqual(frame.get_string("background-color"), "white")
+
+    def test_system_font_family_with_punctuation_round_trips(self):
+        clock = self.host.card("clock")
+        updated = self.host.apply_card("clock", clock, {"font": "Family's & Sans"})
+        self.assertEqual(updated.font, "Family's & Sans")
+        updated = self.host.apply_card("clock", updated, {"font": ""})
+        self.assertEqual(updated.font, "")

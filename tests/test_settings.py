@@ -33,7 +33,8 @@ class CardEditorTest(unittest.TestCase):
         editor.edit(accent="#319b86")
         editor.select_theme("Blueprint")
         editor.mark_saved(editor.draft)
-        editor.select_theme("Afterglow")
+        editor.select_theme("Graphite")
+        self.assertEqual(editor.draft.accent, "#ad98ce")
         editor.cancel()
 
         self.assertEqual(editor.theme, "Blueprint")

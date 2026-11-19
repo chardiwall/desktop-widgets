@@ -84,17 +84,15 @@ export class WidgetIndicator {
     refresh() {
         if (!this.button)
             return;
-        if (this.mode === 'stopped')
-            this.button.hide();
-        else
-            this.button.show();
+        const mode = this.mode;
+        this.button.visible = mode !== 'stopped';
 
         const flags = Object.assign({}, ...this.extension.settings.get_value('widgets').recursiveUnpack());
         for (const [id, item] of this.switches) {
             item.setToggleState(flags[id]?.enabled === true);
             item.setSensitive(Boolean(flags[id]));
         }
-        this.visibility.label.text = this.mode === 'hidden' ? 'Show all widgets' : 'Hide all widgets';
+        this.visibility.label.text = mode === 'hidden' ? 'Show all widgets' : 'Hide all widgets';
     }
 
     run(args) {
@@ -103,7 +101,7 @@ export class WidgetIndicator {
             return;
         }
         try {
-            const process = Gio.Subprocess.new(['/usr/bin/desktop-widget-settings', ...args], Gio.SubprocessFlags.STDERR_PIPE);
+            const process = Gio.Subprocess.new(['desktop-widget-settings', ...args], Gio.SubprocessFlags.STDERR_PIPE);
             this.pending = true;
             process.communicate_utf8_async(null, null, (subprocess, result) => {
                 this.pending = false;

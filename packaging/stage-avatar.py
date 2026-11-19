@@ -13,12 +13,11 @@ from PIL import Image, ImageChops, ImageStat
 
 
 ROOT = Path(__file__).resolve().parents[1]
-UUID = "azclock@azclock.gitlab.com"
 MIB = 1024 * 1024
 
 sys.path.insert(0, str(ROOT))
 from desktop_widgets.bridge.gnome import HostError
-from desktop_widgets.bridge.integration import BUNDLE, BRIDGE_FILES, patch_avatar
+from desktop_widgets.bridge.integration import BUNDLE, bundle_assets, prepare_extension, prepare_release
 
 
 def frame_bounds(paths):
@@ -79,20 +78,15 @@ def pack_walk(source, destination, listening=None):
         if bounds[0] != bounds[-1] or max(ImageStat.Stat(difference).mean) > 0.1:
             raise ValueError("The walk must end in its original standing pose")
 
-    with Image.open(paths[0]) as frame:
-        (destination / "rest.rgba").write_bytes(frame.crop(box).tobytes())
-    with (destination / "walk.rgba").open("wb") as pixels:
-        for path in paths[1:-1]:
-            with Image.open(path) as frame:
-                pixels.write(frame.crop(box).tobytes())
     if leisure:
         for anchor, frame_box in zip(leisure["anchors"], listening_bounds):
             anchor["ground"] = frame_box[3] - bounds[0][3]
             for name in ("head", "hand"):
                 anchor[name][0] -= x0
                 anchor[name][1] -= y0
-        with (destination / "listening.rgba").open("wb") as pixels:
-            for path in listening_paths[1:]:
+    for name, frames in (("rest", paths[:1]), ("walk", paths[1:-1]), ("listening", listening_paths[1:])):
+        with (destination / f"{name}.rgba").open("wb") as pixels:
+            for path in frames:
                 with Image.open(path) as frame:
                     pixels.write(frame.crop(box).tobytes())
     manifest.update(width=width, height=height, pivot=pivot)
@@ -105,28 +99,23 @@ def pack_walk(source, destination, listening=None):
 
 def stage(source, walk, output, listening=None):
     output = output.parent.resolve() / output.name
-    metadata = json.loads((source / "metadata.json").read_text())
-    if metadata.get("uuid") != UUID or metadata.get("version-name") != "16.1":
-        raise ValueError("The avatar pilot requires AzClock 16.1")
     if output.exists() or output.is_symlink() or output.is_relative_to(source):
         raise ValueError("Choose a new output directory outside the AzClock installation")
-
-    extension = patch_avatar((source / "extension.js").read_text())
+    _, extension = prepare_extension(source)
+    audio = ROOT / "dist/native/avatar-audio"
+    if not audio.is_file():
+        raise ValueError("Build the native Avatar files before staging the preview.")
 
     output.parent.mkdir(parents=True, exist_ok=True)
     with TemporaryDirectory(dir=output.parent, prefix=".avatar-stage-") as temp:
-        candidate = Path(temp) / UUID
-        shutil.copytree(source, candidate)
-        (candidate / "extension.js").write_text(extension)
-        bundle = candidate / BUNDLE
-        bridge = bundle / "bridge"
-        avatar = bundle / "widgets/avatar"
-        bridge.mkdir(parents=True, exist_ok=True)
-        avatar.mkdir(parents=True, exist_ok=True)
-        for name in BRIDGE_FILES:
-            shutil.copyfile(ROOT / "desktop_widgets/bridge" / name, bridge / name)
-        shutil.copyfile(ROOT / "desktop_widgets/widgets/avatar/motion.js", avatar / "motion.js")
-        pack_walk(walk, avatar, listening)
+        root = Path(temp)
+        frames = root / "frames"
+        frames.mkdir()
+        pack_walk(walk, frames, listening)
+        assets = bundle_assets(frames, audio)
+        candidate = root / "extension"
+        shutil.copytree(source, candidate, ignore=lambda path, _: {BUNDLE.split("/")[0]} if Path(path) == source else ())
+        (candidate / "extension.js").write_bytes(prepare_release(candidate, extension, assets))
         candidate.rename(output)
 
 

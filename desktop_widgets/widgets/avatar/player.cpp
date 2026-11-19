@@ -91,7 +91,7 @@ private:
     GSettings *session{};
     GSimpleAction *state{};
     guint bus_watch{}, timer{}, folder_revision{};
-    bool playing{}, want_play{}, updating_progress{};
+    bool playing{}, want_play{};
     std::optional<Selection> current;
     std::vector<fs::path> files;
     Names catalogue{g_strsplit(surah_names, "|", -1), g_strfreev};
@@ -123,7 +123,8 @@ private:
                 if (g_str_equal(mode.get(), "stopped"))
                     g_application_quit(G_APPLICATION(self->app));
             }), this);
-            Text mode(g_settings_get_string(session, "session-mode"), g_free);
+            // GSettings only emits changes after the connected key has been read.
+            g_free(g_settings_get_string(session, "session-mode"));
         }
     }
 
@@ -198,7 +199,7 @@ private:
         label(GTK_WIDGET(seek), "Playback position");
         g_signal_connect(seek, "change-value", G_CALLBACK(+[](GtkRange *, GtkScrollType, double seconds,
                                                             Player *self) -> gboolean {
-            if (self->current && !self->updating_progress)
+            if (self->current)
                 gst_element_seek_simple(self->pipeline, GST_FORMAT_TIME,
                     GstSeekFlags(GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_KEY_UNIT), gint64(seconds * GST_SECOND));
             return false;
@@ -359,10 +360,8 @@ private:
         const bool available = current && gst_element_query_duration(pipeline, GST_FORMAT_TIME, &duration) &&
                                gst_element_query_position(pipeline, GST_FORMAT_TIME, &position) && duration > 0;
         if (available) {
-            updating_progress = true;
             gtk_range_set_range(seek, 0, double(duration) / GST_SECOND);
             gtk_range_set_value(seek, double(position) / GST_SECOND);
-            updating_progress = false;
         }
         gtk_widget_set_sensitive(GTK_WIDGET(seek), available);
     }

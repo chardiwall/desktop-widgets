@@ -13,11 +13,12 @@ gi.require_version("Gdk", "4.0")
 gi.require_version("PangoCairo", "1.0")
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk, PangoCairo
 
-from .bridge import APP_ID, PLACEMENTS, HostError, discover, install_bridge, open_session
-from .settings import CardEditor, STYLES, THEMES, WIDGETS, theme_preview
+from .bridge.gnome import ANCHORS, AzClockHost, HostError
+from .bridge.integration import install_bridge
+from .bridge.session import APP_ID, Session
+from .settings import CARD_STYLES, CardEditor, STYLES, THEMES, WIDGETS, theme_preview
 
 EXTENSIONS_URL = "https://extensions.gnome.org/extension/5156/desktop-clock/"
-FONTS = ("Ubuntu Sans", "Noto Sans", "Noto Serif", "DejaVu Sans Mono", "Amiri", "Noto Naskh Arabic")
 
 
 def _row(group, title, control, subtitle=None):
@@ -105,18 +106,23 @@ class CardPage:
         self.style.connect("notify::selected", lambda dropdown, _: self.edit(style=STYLES[dropdown.get_selected()]))
 
         self.colors = {}
+        self.use_preview_colour = Gtk.Button(label="Use preview colour", valign=Gtk.Align.CENTER)
+        self.use_preview_colour.connect("clicked", lambda _: self.edit(background=self.editor.draft.background))
         for field, title in (("background", "Background"), ("text", "Text colour"), ("accent", "Frame accent")):
             dialog = Gtk.ColorDialog(with_alpha=False)
             button = Gtk.ColorDialogButton.new(dialog)
             self.colors[field] = button
-            _row(group, title, button)
+            row = _row(group, title, button)
+            if field == "background":
+                row.add_suffix(self.use_preview_colour)
             button.connect("notify::rgba", self.choose_color, field)
 
         available = {family.get_name() for family in PangoCairo.FontMap.get_default().list_families()}
         theme_fonts = (values[-1] for values in THEMES[name].values())
-        self.fonts = tuple(dict.fromkeys(("", self.editor.saved.font, *theme_fonts,
-                                         *(font for font in FONTS if font in available))))
+        available.update(theme_fonts)
+        self.fonts = ["", *sorted(available - {""}, key=lambda font: (font.casefold(), font))]
         self.font = _choice(("System font", *self.fonts[1:]))
+        self.font.set_enable_search(True)
         _row(group, "Default font", self.font, "The renderer can specify fonts for individual lines.")
         self.font.connect("notify::selected", lambda dropdown, _: self.edit(font=self.fonts[dropdown.get_selected()]))
 
@@ -157,9 +163,13 @@ class CardPage:
                 self.render_sample(tile_card, label, css, miniature=True)
             self.transparency.set_value(card.transparency)
             self.style.set_selected(STYLES.index(card.style))
-            self.font.set_selected(self.fonts.index(card.font) if card.font in self.fonts else 0)
+            if card.font not in self.fonts:
+                self.fonts.append(card.font)
+                self.font.get_model().append(card.font)
+            self.font.set_selected(self.fonts.index(card.font))
             self.size.set_value(card.size)
             self.width.set_value(card.width)
+            self.use_preview_colour.set_visible(not card.background_readable)
             for field, button in self.colors.items():
                 rgba = Gdk.RGBA()
                 rgba.parse(getattr(card, field))
@@ -172,17 +182,14 @@ class CardPage:
             self.refreshing = False
 
     def render_sample(self, card, label, css, miniature=False):
-        radius = {"Glass": 13, "Solid": 8, "Minimal": 4}[card.style]
-        border = 1 if card.style != "Minimal" else 0
-        opacity = (100 - card.transparency) / 100
+        radius, border = CARD_STYLES[card.style]
         # Swatches retain enough fill to identify a palette when the selected card is fully transparent.
-        swatch_opacity = max(0.82, opacity) if miniature else opacity
+        opacity = max(0.82, card.opacity) if miniature else card.opacity
         padding = 5 if miniature else 12
         css.load_from_string(
-            f"label {{ background-color: alpha({card.background}, {swatch_opacity}); color: {card.text}; "
+            f"label {{ background-color: alpha({card.background}, {opacity}); color: {card.text}; "
             f"border: {border}px solid {card.accent}; border-radius: {radius}px; padding: {padding}px; }}"
         )
-        font = escape(card.font or "Sans", quote=True)
         if self.name == "ayah":
             arabic_size = 12 if miniature else card.size + 9
             translation_size = 8 if miniature else card.size
@@ -207,7 +214,9 @@ class CardPage:
             )
             if not miniature:
                 content += '\n<small>Day progress</small>'
-        label.set_markup(f'<span font_family="{font}">{content}</span>')
+        if card.font:
+            content = f'<span font_family="{escape(card.font, quote=True)}">{content}</span>'
+        label.set_markup(content)
 
     def apply(self):
         try:
@@ -256,7 +265,7 @@ class PlacementPage:
                              margin_top=12, margin_bottom=6)
         self.anchors = {}
         previous = None
-        for index, (position, arrow) in enumerate(zip(PLACEMENTS, ("↖", "↑", "↗", "←", "•", "→", "↙", "↓", "↘"), strict=True)):
+        for index, (position, arrow) in enumerate(zip(ANCHORS, ("↖", "↑", "↗", "←", "•", "→", "↙", "↓", "↘"), strict=True)):
             button = Gtk.ToggleButton(label=arrow, tooltip_text=position)
             button.update_property([Gtk.AccessibleProperty.LABEL], [position])
             if previous is not None:
@@ -367,14 +376,6 @@ class SettingsWindow(Adw.ApplicationWindow):
             if name == "avatar":
                 general.set_description("The avatar can stand on the clock when both are on the same display.")
             else:
-                if name == "ayah" and (cord_visible := host.cord_visible()) is not None:
-                    cord = Adw.PreferencesGroup(title="Pull cord")
-                    page.add(cord)
-                    toggle = Gtk.Switch(active=cord_visible)
-                    handler = toggle.connect("notify::active", self.set_visibility, "cord")
-                    toggle.visibility_handler = handler
-                    self.switches["cord"] = toggle
-                    _row(cord, "Show line and switch", toggle, "Shows both parts below the Ayah card.")
                 try:
                     CardPage(page, name, self)
                 except (HostError, GLib.Error) as exc:
@@ -398,8 +399,6 @@ class SettingsWindow(Adw.ApplicationWindow):
     def refresh_switches(self, *_):
         try:
             states = self.host.visibility()
-            if "cord" in self.switches:
-                states["cord"] = self.host.cord_visible() is True
         except (HostError, GLib.Error) as exc:
             self.notify(str(exc))
             return
@@ -412,10 +411,7 @@ class SettingsWindow(Adw.ApplicationWindow):
 
     def set_visibility(self, switch, _, name):
         try:
-            if name == "cord":
-                self.host.set_cord_visible(switch.get_active())
-            else:
-                self.host.set_visible(name, switch.get_active())
+            self.host.set_visible(name, switch.get_active())
         except (HostError, GLib.Error) as exc:
             with switch.handler_block(switch.visibility_handler):
                 switch.set_active(not switch.get_active())
@@ -428,7 +424,7 @@ class Application(Adw.Application):
 
     def do_startup(self):
         Adw.Application.do_startup(self)
-        self.session = open_session()
+        self.session = Session.discover()
         if self.session:
             self.session.watch_stopped(self.quit)
 
@@ -437,7 +433,7 @@ class Application(Adw.Application):
             window.present()
             return
         try:
-            host = discover()
+            host = AzClockHost.discover()
             message = host.status()
         except (HostError, GLib.Error) as exc:
             host = None
@@ -456,7 +452,6 @@ def main():
     actions = parser.add_mutually_exclusive_group()
     actions.add_argument("--install-gnome-integration", action="store_true",
                          help="back up AzClock and install the shared widget bridge and avatar")
-    actions.add_argument("--toggle-pull-cord", action="store_true", help=argparse.SUPPRESS)
     actions.add_argument("--set-widget", nargs=2, help=argparse.SUPPRESS)
     actions.add_argument("--quit-widgets", action="store_true", help=argparse.SUPPRESS)
     options = parser.parse_args()
@@ -464,15 +459,13 @@ def main():
         try:
             if options.install_gnome_integration:
                 install_bridge()
-            elif options.toggle_pull_cord:
-                discover().toggle_light()
             elif options.set_widget:
                 widget, flag = options.set_widget
                 if widget not in WIDGETS or flag not in ("on", "off"):
                     parser.error("Choose a configured widget and on or off.")
-                discover().set_visible(widget, flag == "on")
+                AzClockHost.discover().set_visible(widget, flag == "on")
             else:
-                session = open_session()
+                session = Session.discover()
                 if not session:
                     raise HostError("The Desktop Widgets session settings schema is missing.")
                 session.quit()

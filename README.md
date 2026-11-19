@@ -20,12 +20,19 @@ The GTK settings app changes visibility, card themes and placement through one d
 
 ## Build and install
 
-Build on Ubuntu with Blender 5, Python 3 with Pillow and PyGObject, a C++20 compiler, pkg-config, GObject Introspection, GTK 4 and GStreamer development files. Render the walk and listening frames using the [avatar build guide](docs/avatar-pilot.md). Then run:
+Install the Ubuntu build dependencies and use Blender 5 to render the walk and listening frames as described in the [avatar build guide](docs/avatar-pilot.md).
 
 ```sh
-sh packaging/build-deb.sh
-sudo apt install "./dist/desktop-widget-settings_0.4.0_$(dpkg --print-architecture).deb"
-desktop-widget-settings --install-gnome-integration
+sudo apt install build-essential dpkg-dev pkg-config gobject-introspection \
+  libglib2.0-dev libgtk-4-dev libgstreamer1.0-dev python3-gi python3-pil
+```
+
+Build and install from the repository root. The commands stop at the first failure, and `--reinstall` lets APT replace an installed copy of the same version.
+
+```sh
+sh packaging/build-deb.sh &&
+  sudo apt install --reinstall "./dist/desktop-widget-settings_0.4.0_$(dpkg --print-architecture).deb" &&
+  desktop-widget-settings --install-gnome-integration
 ```
 
 The last command backs up a local AzClock 16.1 installation and transfers ownership from the legacy desktop avatar service. Log out and back in to load the bridge. The GNOME configuration needs the existing widget IDs `ayah/verse`, `clock/card` and `avatar/body`. For development, use the [isolated preview and checks](docs/avatar-pilot.md#verification).

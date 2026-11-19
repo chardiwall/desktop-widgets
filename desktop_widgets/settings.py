@@ -7,14 +7,15 @@ from .widgets.ayah.themes import THEMES as AYAH_THEMES
 from .widgets.clock.themes import THEMES as CLOCK_THEMES
 
 WIDGETS = {"ayah": "Ayah reminder", "clock": "Clock", "avatar": "Avatar"}
-STYLES = ("Glass", "Solid", "Minimal")
+CARD_STYLES = {"Glass": (18, 1), "Solid": (8, 1), "Minimal": (2, 0)}
+STYLES = tuple(CARD_STYLES)
 COLORS = ("text", "accent", "background")
 THEME_FIELDS = ("style", *COLORS, "font")
 THEMES = {"ayah": AYAH_THEMES, "clock": CLOCK_THEMES}
 
 
 def theme_preview(widget, name, card):
-    return replace(card, **dict(zip(THEME_FIELDS, THEMES[widget][name], strict=True)))
+    return replace(card, background_readable=True, **dict(zip(THEME_FIELDS, THEMES[widget][name], strict=True)))
 
 
 @dataclass(frozen=True)
@@ -27,6 +28,11 @@ class Card:
     size: int = 14
     width: int = 600
     transparency: int = 45
+    background_readable: bool = True
+
+    @property
+    def opacity(self):
+        return (100 - self.transparency) / 100
 
 
 def validate_card(card):
@@ -37,7 +43,7 @@ def validate_card(card):
         raise ValueError("Choose transparency from 0 to 100 percent.")
     if card.style not in STYLES:
         raise ValueError("Choose a supported card style.")
-    if not re.fullmatch(r"[\w .+()-]{0,100}", card.font):
+    if not card.font.isprintable():
         raise ValueError("Choose a font family with a supported name.")
     if not 8 <= card.size <= 48 or not 360 <= card.width <= 1000:
         raise ValueError("Choose a text size of 8–48 pt and a card width of 360–1000 px.")
@@ -52,7 +58,7 @@ class CardEditor:
 
     def select_theme(self, name):
         if name == "Custom":
-            self.draft = replace(self.draft, **{
+            self.draft = replace(self.draft, background_readable=self.custom.background_readable, **{
                 field: getattr(self.custom, field) for field in THEME_FIELDS
             })
         else:
@@ -60,6 +66,8 @@ class CardEditor:
         self.theme = name
 
     def edit(self, **values):
+        if "background" in values:
+            values["background_readable"] = True
         draft = replace(self.draft, **values)
         validate_card(draft)
         self.draft = draft
@@ -72,7 +80,12 @@ class CardEditor:
         return self.draft != self.saved
 
     def changes(self):
-        return {key: value for key, value in asdict(self.draft).items() if value != getattr(self.saved, key)}
+        values = asdict(self.draft)
+        values.pop("background_readable")
+        changes = {key: value for key, value in values.items() if value != getattr(self.saved, key)}
+        if self.draft.background_readable and not self.saved.background_readable:
+            changes["background"] = self.draft.background
+        return changes
 
     def mark_saved(self, card):
         self.saved = self.draft = card

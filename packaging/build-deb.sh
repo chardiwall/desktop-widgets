@@ -9,6 +9,8 @@ multiarch=$(dpkg-architecture -qDEB_HOST_MULTIARCH)
 staging=$(mktemp -d)
 trap 'rm -rf "$staging"' EXIT
 
+sh packaging/build-native.sh "$staging/native"
+
 library="$staging/usr/lib/$package"
 install -d "$staging/DEBIAN" "$library/desktop_widgets"
 for file in desktop_widgets/*.py desktop_widgets/bridge/*.py desktop_widgets/bridge/*.js \
@@ -18,7 +20,6 @@ done
 /usr/bin/python3 packaging/stage-avatar.py --pack-only \
     "${1:-dist/avatar-walk}" "$library/desktop_widgets/widgets/avatar" \
     --listening "${2:-dist/avatar-listening}"
-sh packaging/build-native.sh "$staging/native"
 install -D -m 644 "$staging/native/libdesktopwidgets-motion.so.0" \
     "$staging/usr/lib/$multiarch/libdesktopwidgets-motion.so.0"
 install -D -m 644 "$staging/native/DesktopWidgetsMotion-1.0.typelib" \

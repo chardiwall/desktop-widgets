@@ -6,6 +6,7 @@ import subprocess
 from gi.repository import Gio, GLib
 
 from .gnome import EXTENSION, HostError
+from .integration import AVATAR_MARKER, LEGACY_AVATAR_MARKER
 
 APP_ID = "io.github.desktopwidgets.Settings"
 MODE = "session-mode"
@@ -15,8 +16,10 @@ RESTORE_AVATAR = "resume-legacy-avatar"
 def _legacy_avatar(operation):
     directory = Path(GLib.get_user_data_dir()) / "gnome-shell/extensions" / EXTENSION
     entry = directory / "extension.js"
-    if entry.is_file() and "import {AvatarPilot}" in entry.read_text():
-        return False
+    if entry.is_file():
+        source = entry.read_text()
+        if AVATAR_MARKER in source or LEGACY_AVATAR_MARKER in source:
+            return False
     result = subprocess.run(
         ["systemctl", "--user", operation, "desk-avatar.service"],
         text=True, capture_output=True, timeout=8,
@@ -78,6 +81,14 @@ class Session:
             return
         if not all(self.settings.is_writable(key) for key in (MODE, RESTORE_AVATAR)):
             raise HostError("The widget session setting is read-only.")
-        if self.settings.get_boolean(RESTORE_AVATAR):
-            self.service("start")
-        self._set_state("running", False)
+        started = (self.settings.get_boolean(RESTORE_AVATAR) and not self.service("is-active")
+                   and self.service("start"))
+        try:
+            self._set_state("running", False)
+        except HostError as exc:
+            if started:
+                try:
+                    self.service("stop")
+                except (HostError, OSError, subprocess.SubprocessError) as rollback:
+                    raise HostError(f"{exc} The legacy Avatar could not be stopped: {rollback}") from rollback
+            raise

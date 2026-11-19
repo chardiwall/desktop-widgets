@@ -1,10 +1,11 @@
 """Install the shared desktop bridge against the user's existing AzClock 16.1."""
 
+import hashlib
 import json
 from pathlib import Path
-import shutil
+import re
 import subprocess
-from tempfile import NamedTemporaryFile
+from tempfile import NamedTemporaryFile, TemporaryDirectory
 
 from gi.repository import GLib
 
@@ -12,49 +13,29 @@ from .gnome import EXTENSION, HostError
 
 ROOT = Path(__file__).resolve().parents[1]
 BUNDLE = "desktop-widget-settings/desktop_widgets"
+RELEASES = "desktop-widget-settings/releases"
 BRIDGE_FILES = ("attachments.js", "indicator.js", "azclock-avatar.js", "listening.js", "track.js")
-AVATAR_FILES = ("motion.js", "avatar-audio", "rest.rgba", "walk.rgba", "listening.rgba", "walk-data.js")
-MARKER = "import {WidgetAttachments, displayedWidgets}"
+AVATAR_MODULES = ("motion.js", "placement.js")
+AVATAR_FRAMES = ("rest.rgba", "walk.rgba", "listening.rgba", "walk-data.js")
+MARKER = "import {displayedWidgets}"
+LEGACY_ATTACHMENT_MARKER = "import {WidgetAttachments, displayedWidgets}"
 PANEL_MARKER = "import {WidgetIndicator}"
 HOOKS = (
     ("import {UpdateNotification}",
-     MARKER + " from './desktop-widget-settings/desktop_widgets/bridge/attachments.js';\n\nimport {UpdateNotification}"),
-    ("        const alwaysOnTop = this._settings.get_boolean('always-on-top');\n        if (alwaysOnTop)",
-     "        const alwaysOnTop = EXTENSION?._widgetAttachments?.onTopFor(this) ??\n"
-     "            this._settings.get_boolean('always-on-top');\n        if (alwaysOnTop)"),
-    ("            super.vfunc_allocate(box);\n            return;",
-     "            super.vfunc_allocate(box);\n            EXTENSION?._widgetAttachments?.allocated(this, box);\n            return;"),
-    ("        super.vfunc_allocate(box);\n    }",
-     "        super.vfunc_allocate(box);\n        EXTENSION?._widgetAttachments?.allocated(this, box);\n    }"),
-    ("    _getPosition() {\n        const locationData",
-     "    _getPosition() {\n"
-     "        const attached = EXTENSION?._widgetAttachments?.positionFor(this);\n"
-     "        if (attached)\n            return attached;\n        const locationData"),
-    ("`${GLib.get_home_dir()}/.local/bin/desk-light`, 'toggle'",
-     "'/usr/bin/desktop-widget-settings', '--toggle-pull-cord'"),
-    ("        this.style = style;\n\n        this.queue_relayout();",
-     "        this.style = style + (EXTENSION?._widgetAttachments?.lightStyle(this) ?? '');\n\n        this.queue_relayout();"),
-    ("        this.widgets = new Map();\n        this._oldWidgetIds = [];",
-     "        this.widgets = new Map();\n        this._widgetAttachments = new WidgetAttachments(this);\n"
-     "        this._oldWidgetIds = [];"),
-    ("    disable() {\n", "    disable() {\n        this._widgetAttachments?.destroy();\n"
-     "        this._widgetAttachments = null;\n"),
+     f"{MARKER} from './{BUNDLE}/bridge/attachments.js';\n\n" "import {UpdateNotification}"),
     ("        const widgetIds = [];",
      "        let widgetIds = [];"),
     ("        const deletedWidgets = this._oldWidgetIds.filter",
      "        widgetIds = displayedWidgets(widgetIds);\n        const deletedWidgets = this._oldWidgetIds.filter"),
-    ("        this._oldWidgetIds = widgetIds;\n", "        this._oldWidgetIds = widgetIds;\n"
-     "        this._widgetAttachments?.refresh();\n"),
 )
 PANEL_HOOKS = (
-    ("import {UpdateNotification}", PANEL_MARKER +
-     " from './desktop-widget-settings/desktop_widgets/bridge/indicator.js';\n\nimport {UpdateNotification}"),
-    ("        this._widgetAttachments = new WidgetAttachments(this);",
-     "        this._widgetAttachments = new WidgetAttachments(this);\n"
-     "        this._widgetIndicator = new WidgetIndicator(this);"),
-    ("        this._widgetAttachments?.destroy();",
-     "        this._widgetIndicator?.destroy();\n        this._widgetIndicator = null;\n"
-     "        this._widgetAttachments?.destroy();"),
+    ("import {UpdateNotification}",
+     f"{PANEL_MARKER} from './{BUNDLE}/bridge/indicator.js';\n\n" "import {UpdateNotification}"),
+    ("        this._oldWidgetIds = [];",
+     "        this._widgetIndicator = new WidgetIndicator(this);\n        this._oldWidgetIds = [];"),
+    ("    disable() {\n",
+     "    disable() {\n"
+     "        this._widgetIndicator?.destroy();\n        this._widgetIndicator = null;\n"),
     ("        widgetIds = displayedWidgets(widgetIds);",
      "        widgetIds = displayedWidgets(this._widgetIndicator?.displayedWidgets(widgetIds) ?? widgetIds);"),
     ("        this._syncClockTimerToNearestSecond();",
@@ -63,10 +44,26 @@ PANEL_HOOKS = (
 )
 
 
-AVATAR_MARKER = "import {AvatarPilot}"
+LEGACY_AVATAR_MARKER = "import {AvatarPilot}"
+AVATAR_MARKER = "this._avatarPilotLoad = load;"
+AVATAR_REFRESH = "        this._oldWidgetIds = widgetIds;\n        this._avatarPilot?.refresh();"
+AVATAR_STOP = "        this._avatarPilot?.destroy();\n        this._avatarPilot = null;\n"
+AVATAR_CANCEL = "        this._avatarPilotLoad = null;\n"
+AVATAR_LOAD = (
+    f"{AVATAR_REFRESH}\n"
+    "        if (this.widgets.has('avatar') && !this._avatarPilotLoad) {\n"
+    f"            const load = import('./{BUNDLE}/bridge/azclock-avatar.js');\n"
+    f"            {AVATAR_MARKER}\n"
+    "            load.then(({AvatarPilot}) => {\n"
+    "                if (this._avatarPilotLoad === load)\n"
+    "                    this._avatarPilot = new AvatarPilot(this);\n"
+    "            }).catch(error => {\n"
+    "                if (this._avatarPilotLoad === load)\n"
+    "                    console.warn(`Desktop Widgets: Avatar renderer could not start: ${error.message}`);\n"
+    "            });\n"
+    "        }"
+)
 AVATAR_HOOKS = (
-    ("import {UpdateNotification}", AVATAR_MARKER +
-     " from './desktop-widget-settings/desktop_widgets/bridge/azclock-avatar.js';\n\nimport {UpdateNotification}"),
     ("        this._oldElementIds = elementIds;\n        this.queue_relayout();",
      "        this._oldElementIds = elementIds;\n        this.queue_relayout();\n"
      "        EXTENSION?._avatarPilot?.refresh();"),
@@ -74,39 +71,128 @@ AVATAR_HOOKS = (
      "        EXTENSION?._avatarPilot?.refresh();"),
     ("        this._isDragging = false;", "        this._isDragging = false;\n"
      "        EXTENSION?._avatarPilot?.refresh();"),
-    ("        SETTINGS.connectObject('changed::widgets', () => this._createWidgets(), this);",
-     "        SETTINGS.connectObject('changed::widgets', () => this._createWidgets(), this);\n"
-     "        this._avatarPilot = new AvatarPilot(this);"),
-    ("    disable() {\n", "    disable() {\n        this._avatarPilot?.destroy();\n"
-     "        this._avatarPilot = null;\n"),
-    ("        this._oldWidgetIds = widgetIds;", "        this._oldWidgetIds = widgetIds;\n"
-     "        this._avatarPilot?.refresh();"),
+    ("    disable() {\n", "    disable() {\n" + AVATAR_CANCEL + AVATAR_STOP),
+    ("        this._oldWidgetIds = widgetIds;", AVATAR_LOAD),
+)
+LEGACY_AVATAR_HOOKS = (
+    (f"{LEGACY_AVATAR_MARKER} from './{BUNDLE}/bridge/azclock-avatar.js';\n\n", ""),
+    ("        this._avatarPilot = new AvatarPilot(this);\n", ""),
+    (AVATAR_STOP, AVATAR_CANCEL + AVATAR_STOP),
+    (AVATAR_REFRESH, AVATAR_LOAD),
+)
+WIDGET_START = "\n                widget = this._createWidget(widgetId);"
+WIDGET_START_GUARD = (
+    "\n                try {"
+    "\n                    widget = this._createWidget(widgetId);"
+    "\n                } catch (error) {"
+    "\n                    console.warn(`Desktop Widgets: ${widgetId} could not start: ${error.message}`);"
+    "\n                    continue;"
+    "\n                }"
 )
 
 
-def _apply_hooks(source, marker, hooks):
-    if marker not in source:
-        for match, replacement in hooks:
-            if source.count(match) != 1:
-                raise HostError(f"AzClock source does not match the integration hook: {match.strip()}")
-            source = source.replace(match, replacement, 1)
+def _replace_hooks(source, hooks):
+    for match, replacement in hooks:
+        if source.count(match) != 1:
+            raise HostError(f"AzClock source does not match the integration hook: {match.strip()}")
+        source = source.replace(match, replacement, 1)
     return source
 
 
-def patch_avatar(source):
-    for name in ("attachments.js", "indicator.js"):
-        source = source.replace(f"{BUNDLE}/{name}", f"{BUNDLE}/bridge/{name}")
-    source = source.replace("from './avatar/azclock.js'", f"from './{BUNDLE}/bridge/azclock-avatar.js'")
-    return _apply_hooks(source, AVATAR_MARKER, AVATAR_HOOKS)
+def _apply_hooks(source, marker, hooks):
+    return source if marker in source else _replace_hooks(source, hooks)
 
 
 def patch_extension(source):
+    source = re.sub(rf"(from |import\()'\./{RELEASES}/[0-9a-f]{{64}}/desktop_widgets(?=/bridge/)",
+                    rf"\1'./{BUNDLE}", source)
+    # Strip the local desk-light patch from both original and previously integrated installs.
+    source = re.sub(
+        r"        // Local patch \(desk-light\):[^\n]*\n(?:[^\n]*\n)*?"
+        r"        this\.reactive = this\._isDeskLightKnob \|\| !this\._settings\.get_boolean\('lock-widget'\);",
+        "        this.reactive = !this._settings.get_boolean('lock-widget');",
+        source,
+    )
+    source = re.sub(r"        if \(this\._isDeskLightKnob\) // desk-light:[^\n]*\n"
+                    r"            return Clutter\.EVENT_STOP;\n", "", source)
+    source = re.sub(r"        if \(this\._isDeskLightKnob\) \{ // desk-light:[^\n]*\n"
+                    r"(?:[^\n]*\n)*?        \}\n", "", source)
+    source = source.replace(
+        "this.style = style + (EXTENSION?._widgetAttachments?.lightStyle(this) ?? '');",
+        "this.style = style;",
+    )
+    if LEGACY_ATTACHMENT_MARKER in source:
+        source = source.replace(LEGACY_ATTACHMENT_MARKER, MARKER)
+        source = source.replace(
+            "EXTENSION?._widgetAttachments?.onTopFor(this) ??\n            ", "")
+        source = source.replace(
+            "        const attached = EXTENSION?._widgetAttachments?.positionFor(this);\n"
+            "        if (attached)\n            return attached;\n", "")
+        source = re.sub(r"^ +(?:EXTENSION\?\._widgetAttachments\?\.allocated\(this, box\);|"
+                        r"this\._widgetAttachments(?: = new WidgetAttachments\(this\)| = null|"
+                        r"\?\.(?:destroy|refresh)\(\));)\n", "", source, flags=re.MULTILINE)
+        if "_widgetAttachments" in source or "WidgetAttachments" in source:
+            raise HostError("AzClock source has an unrecognized Avatar attachment hook.")
+
+    for name in ("attachments.js", "indicator.js"):
+        source = source.replace(f"{BUNDLE}/{name}", f"{BUNDLE}/bridge/{name}")
+    source = source.replace("from './avatar/azclock.js'", f"from './{BUNDLE}/bridge/azclock-avatar.js'")
     source = _apply_hooks(source, MARKER, HOOKS)
     source = _apply_hooks(source, PANEL_MARKER, PANEL_HOOKS)
-    return patch_avatar(source)
+    if LEGACY_AVATAR_MARKER in source:
+        source = _replace_hooks(source, LEGACY_AVATAR_HOOKS)
+    else:
+        source = _apply_hooks(source, AVATAR_MARKER, AVATAR_HOOKS)
+    source = _apply_hooks(source, WIDGET_START_GUARD, ((WIDGET_START, WIDGET_START_GUARD),))
+    for hook, count in (
+        (f"{MARKER} from './{BUNDLE}/bridge/attachments.js';", 1),
+        (f"{PANEL_MARKER} from './{BUNDLE}/bridge/indicator.js';", 1),
+        (AVATAR_LOAD, 1),
+        (AVATAR_CANCEL + AVATAR_STOP, 1),
+        (WIDGET_START_GUARD, 1),
+        ("let widgetIds = [];", 1),
+        ("new WidgetIndicator(this);", 1),
+        ("this._widgetIndicator?.destroy();", 1),
+        ("this._widgetIndicator?.refresh();", 1),
+        ("widgetIds = displayedWidgets(this._widgetIndicator?.displayedWidgets(widgetIds) ?? widgetIds);", 1),
+        ("new AvatarPilot(this);", 1),
+        ("this._avatarPilot?.destroy();", 1),
+        ("EXTENSION?._avatarPilot?.refresh();", 3),
+        ("this._avatarPilot?.refresh();", 1),
+    ):
+        if source.count(hook) != count:
+            raise HostError(f"AzClock source does not match the integration hook: {hook}")
+    return source
 
 
-def _replace_file(destination, content, mode=0o644):
+def prepare_extension(directory):
+    try:
+        metadata = json.loads((directory / "metadata.json").read_text())
+    except ValueError as exc:
+        raise HostError("AzClock metadata must be a valid JSON object.") from exc
+    if not isinstance(metadata, dict):
+        raise HostError("AzClock metadata must be a valid JSON object.")
+    if metadata.get("uuid") != EXTENSION or metadata.get("version-name") != "16.1":
+        raise HostError("This integration requires the local AzClock 16.1 setup.")
+    entry = directory / "extension.js"
+    if entry.is_symlink():
+        raise HostError("Use a local AzClock source file before adding the integration.")
+    original = entry.read_bytes()
+    return original, patch_extension(original.decode()).encode()
+
+
+def bundle_assets(frames, audio):
+    avatar = ROOT / "widgets/avatar"
+    paths = {
+        **{f"bridge/{name}": ROOT / "bridge" / name for name in BRIDGE_FILES},
+        **{f"widgets/avatar/{name}": avatar / name for name in AVATAR_MODULES},
+        **{f"widgets/avatar/{name}": frames / name for name in AVATAR_FRAMES},
+        "widgets/avatar/avatar-audio": audio,
+    }
+    return {path: source.read_bytes() for path, source in paths.items()}
+
+
+def _replace_file(destination, content, mode):
     with NamedTemporaryFile(dir=destination.parent, delete=False) as temporary:
         staging = Path(temporary.name)
         try:
@@ -118,39 +204,52 @@ def _replace_file(destination, content, mode=0o644):
             staging.unlink(missing_ok=True)
 
 
+def prepare_release(directory, entry, assets):
+    digest = hashlib.sha256()
+    for name, content in sorted(assets.items()):
+        digest.update(name.encode() + b"\0" + hashlib.sha256(content).digest())
+    bundle = f"{RELEASES}/{digest.hexdigest()}/desktop_widgets"
+    destination = directory / bundle
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if not destination.exists():
+        with TemporaryDirectory(dir=destination.parent, prefix=".stage-") as temporary:
+            staged = Path(temporary) / "desktop_widgets"
+            for name, content in assets.items():
+                file = staged / name
+                file.parent.mkdir(parents=True, exist_ok=True)
+                file.write_bytes(content)
+                file.chmod(0o755 if file.name == "avatar-audio" else 0o644)
+            try:
+                staged.rename(destination)
+            except OSError:
+                if not destination.is_dir():
+                    raise
+    for name, content in assets.items():
+        if (destination / name).read_bytes() != content:
+            raise HostError(f"The staged AzClock release differs from the package at {name}.")
+    return entry.replace(f"'./{BUNDLE}/bridge/".encode(), f"'./{bundle}/bridge/".encode())
+
+
 def install_bridge():
     directory = Path(GLib.get_user_data_dir()) / "gnome-shell/extensions" / EXTENSION
     entry = directory / "extension.js"
-    metadata = json.loads((directory / "metadata.json").read_text())
-    if metadata.get("uuid") != EXTENSION or metadata.get("version-name") != "16.1":
-        raise HostError("This integration requires the local AzClock 16.1 setup.")
-    if entry.is_symlink():
-        raise HostError("Install AzClock in the local extensions directory before adding the integration.")
-    original = entry.read_bytes()
-    updated = patch_extension(original.decode()).encode()
-    assets = {**{f"bridge/{name}": (ROOT / "bridge" / name).read_bytes() for name in BRIDGE_FILES},
-              **{f"widgets/avatar/{name}": (ROOT / "widgets/avatar" / name).read_bytes()
-                 for name in AVATAR_FILES}}
+    original, updated = prepare_extension(directory)
+    avatar = ROOT / "widgets/avatar"
+    assets = bundle_assets(avatar, avatar / "avatar-audio")
     backup = entry.with_name("extension.js.before-desktop-widget-settings")
-    if original != updated:
-        if backup.exists():
-            if MARKER not in original.decode() and backup.read_bytes() != original:
-                raise HostError("The AzClock source differs from the existing backup. Review both before continuing.")
-        else:
-            shutil.copy2(entry, backup)
+    if (backup.exists() and MARKER.encode() not in original and LEGACY_ATTACHMENT_MARKER.encode() not in original
+            and backup.read_bytes() != original):
+        raise HostError("The AzClock source differs from the existing backup. Review both before continuing.")
 
-    for asset, content in assets.items():
-        destination = directory / BUNDLE / asset
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        _replace_file(destination, content, 0o755 if destination.name == "avatar-audio" else 0o644)
+    updated = prepare_release(directory, updated, assets)
 
     # The legacy watcher resets the card widths and borders on startup.
-    legacy = Path.home() / ".config/systemd/user/desk-light.service"
-    if legacy.is_file():
-        subprocess.run(["systemctl", "--user", "disable", "--now", "desk-light.service"], check=True)
-    legacy_avatar = Path.home() / ".config/systemd/user/desk-avatar.service"
-    if legacy_avatar.is_file():
-        subprocess.run(["systemctl", "--user", "disable", "--now", "desk-avatar.service"], check=True)
+    units = Path.home() / ".config/systemd/user"
+    for unit in ("desk-light.service", "desk-avatar.service"):
+        if (units / unit).is_file():
+            subprocess.run(["systemctl", "--user", "disable", "--now", unit], check=True)
     if original != updated:
+        if not backup.exists():
+            _replace_file(backup, original, entry.stat().st_mode & 0o777)
         _replace_file(entry, updated, entry.stat().st_mode & 0o777)
     print(f"Desktop bridge and avatar installed. Log out and back in to load them. Backup: {backup}")

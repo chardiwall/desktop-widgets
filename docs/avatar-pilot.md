@@ -17,6 +17,7 @@ blender -b character/3d/character_animated.blend -t 3 --python-exit-code 1 \
   -P character/3d/render_avatar_walk.py -- dist/avatar-walk
 blender -b character/3d/character_animated.blend -t 3 --python-exit-code 1 \
   -P character/3d/render_avatar_listening.py -- dist/avatar-listening
+sh packaging/build-native.sh
 /usr/bin/python3 packaging/stage-avatar.py \
   "$HOME/.local/share/gnome-shell/extensions/azclock@azclock.gitlab.com" \
   dist/avatar-walk dist/avatar-pilot/gnome-shell/extensions/azclock@azclock.gitlab.com \
@@ -24,7 +25,7 @@ blender -b character/3d/character_animated.blend -t 3 --python-exit-code 1 \
 sh packaging/preview-avatar.sh
 ```
 
-The preview starts a nested GNOME Shell using temporary settings and a sample clock card. Use a regular Ubuntu Wayland session with GNOME's development kit available. The staging command refuses to overwrite an existing destination. For an interrupted render made with the same scene and script, pass `--resume` after the output path to reuse completed frames.
+The preview starts a nested GNOME Shell with temporary settings and a sample clock card. It prepares the same AzClock hooks and Avatar assets as installation and runs the settings app from this checkout. Use an Ubuntu Wayland session with GNOME's development kit. Stage into a fresh destination. For an interrupted render made with the same scene and script, pass `--resume` after the output path to reuse completed frames.
 
 ## Verification
 
@@ -33,6 +34,7 @@ The preview starts a nested GNOME Shell using temporary settings and a sample cl
 gjs -m tests/widget-attachments.js
 sh packaging/build-native.sh
 GI_TYPELIB_PATH="$PWD/dist/native" LD_LIBRARY_PATH="$PWD/dist/native" gjs -m tests/avatar-motion.js
+GI_TYPELIB_PATH="$PWD/dist/native" LD_LIBRARY_PATH="$PWD/dist/native" gjs -m tests/avatar-pilot.js
 c++ -std=c++20 $(pkg-config --cflags gstreamer-1.0) tests/avatar-media.cpp \
   desktop_widgets/widgets/avatar/media.cpp -o dist/native/test-avatar-media \
   $(pkg-config --libs gstreamer-1.0)
@@ -43,4 +45,4 @@ The motion check exercises shaped Arabic and Latin text, missing and narrow trac
 
 In the nested preview, request a walk, play a local file and a surah, toggle rain during each state, and cover and uncover the clock. Check the props follow the moving pose, that rain remains clipped to the card, and that pause returns to standing only when rain is off. Test input through the margins, GNOME Reduced Motion, and repeated disable/enable. Profile the real session only after this check passes. [GNOME development session](https://gjs.guide/extensions/development/debugging.html) · [Battery test plan](avatar-resource-estimate.md#first-measurement-gate)
 
-The current pilot uses one fixed-size outfit. It conservatively pauses in background mode when a window intersects the available route. Focus, prayer reminders and further actions follow this slice. The standard integration disables the legacy `desk-avatar.service` during installation so the GNOME bridge owns avatar placement. [Architecture and activity roster](avatar-architecture.md)
+The current pilot uses one fixed-size outfit. It waits for a clear route before starting a walk in background mode. Focus, prayer reminders and further actions follow this slice. The standard integration disables the legacy `desk-avatar.service` during installation so the GNOME bridge owns avatar placement. [Architecture and activity roster](avatar-architecture.md)

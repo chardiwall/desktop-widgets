@@ -11,7 +11,8 @@ import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
 import {ListeningScene} from './listening.js';
 import {measureTrack} from './track.js';
-import {overlaps, placeOnTrack, sampleWalk} from '../widgets/avatar/motion.js';
+import {sampleWalk} from '../widgets/avatar/motion.js';
+import {resolveAvatarPlacement} from '../widgets/avatar/placement.js';
 import {listening, walk} from '../widgets/avatar/walk-data.js';
 
 const AVATAR_DIR = Gio.File.new_for_uri(import.meta.url).get_parent().resolve_relative_path('../widgets/avatar');
@@ -23,14 +24,15 @@ const FRAME_BYTES = ROW_BYTES * walk.height;
 const PLAYER_ID = 'io.github.desktopwidgets.Media';
 const PLAYER_PATH = '/io/github/desktopwidgets/Media';
 
-function monitorFor(actor) {
+function boundsFor(actor) {
     if (!actor?.mapped || !actor.has_allocation())
-        return -1;
+        return null;
     const [x, y] = actor.get_transformed_position();
     const [width, height] = actor.get_transformed_size();
-    return global.display.get_monitor_index_for_rect(new Mtk.Rectangle({
+    const monitor = global.display.get_monitor_index_for_rect(new Mtk.Rectangle({
         x: Math.round(x), y: Math.round(y), width: Math.ceil(width), height: Math.ceil(height),
     }));
+    return {x, y, width, height, monitor};
 }
 
 function upload(bytes) {
@@ -105,7 +107,10 @@ export class AvatarPilot {
         this.watch(global.window_group, 'child-added', 'child-removed');
         this.playerWatch = Gio.bus_watch_name(Gio.BusType.SESSION, PLAYER_ID, Gio.BusNameWatcherFlags.NONE,
             (connection, _name, owner) => this.watchPlayer(connection, owner),
-            () => this.unwatchPlayer());
+            () => {
+                this.unwatchPlayer();
+                this.refresh();
+            });
         this.refresh();
     }
 
@@ -142,7 +147,6 @@ export class AvatarPilot {
         this.playerSignals = [];
         this.player = null;
         this.playback = 'none';
-        this.refresh();
     }
 
     watch(object, ...signals) {
@@ -214,7 +218,7 @@ export class AvatarPilot {
         for (const object of watched) {
             if (!this.watched?.has(object)) {
                 if (object === label)
-                    this.watch(object, 'notify::allocation', 'notify::text');
+                    this.watch(object, 'notify::allocation', 'notify::mapped', 'notify::text');
                 else
                     this.watch(object, 'notify::allocation', 'notify::mapped', 'parent-set');
             }
@@ -225,97 +229,113 @@ export class AvatarPilot {
                 this.body.opacity = this.bodyOpacity;
             this.body = body;
             this.bodyOpacity = body?.opacity;
+            if (body && (this.rest || !this.failed))
+                body.opacity = 0;
         }
 
-        const monitor = monitorFor(body);
-        const clock = monitor >= 0 && monitorFor(clockWidget) === monitor ? clockWidget : null;
-        const anchor = clock ?? avatar;
-        const parent = anchor?.get_parent();
-        const blocked = !avatar?.mapped || !body?.mapped || !parent ||
-            Main.sessionMode.isLocked || Main.overview.visible || clock?._isDragging;
-        const geometry = blocked || !body.has_allocation() ? null : this.locate(clock, label, body);
-        const aboveWindows = parent === Main.uiGroup;
-        this.hidden = blocked || (geometry && !aboveWindows && this.covered(geometry));
-        if (!geometry || this.hidden) {
+        const bodyBounds = boundsFor(body);
+        const clock = this.clockPlacement(clockWidget, label, bodyBounds?.monitor);
+        const clockParent = clockWidget?.get_parent();
+        const placement = resolveAvatarPlacement({
+            visible: avatar?.mapped && body?.mapped && !Main.sessionMode.isLocked && !Main.overview.visible,
+            body: bodyBounds,
+            clock,
+            windows: clock?.track && clockParent !== Main.uiGroup ? this.windowBounds() : [],
+        }, walk);
+        this.hidden = placement.kind === 'hidden';
+        this.placementPending = placement.kind === 'pending';
+        if (this.hidden) {
             this.suspend();
             return;
         }
-        const [success, x, y] = parent.transform_stage_point(geometry.x, geometry.y);
-        if (!success) {
+        if (this.placementPending)
+            return;
+
+        const perched = placement.kind === 'perched';
+        const anchor = perched ? clockWidget : avatar;
+        const parent = anchor.get_parent();
+        if (!parent) {
             this.suspend();
+            return;
+        }
+        const [success, x, y] = parent.transform_stage_point(placement.x, placement.y);
+        if (!success) {
+            this.placementPending = true;
             return;
         }
         let card = null;
-        if (clock?.mapped && clock.has_allocation()) {
-            const [cardX, cardY] = clock.get_transformed_position();
-            const [ok, localX, localY] = parent.transform_stage_point(cardX, cardY);
-            const [width, height] = clock.get_transformed_size();
+        if (perched) {
+            const [ok, localX, localY] = parent.transform_stage_point(clock.x, clock.y);
             if (ok)
-                card = {x: localX, y: localY, width, height};
+                card = {x: localX, y: localY, width: clock.width, height: clock.height};
         }
-        const key = [x, y, geometry.width, geometry.height, card?.x, card?.y, card?.width,
-            card?.height, this.animationSettings.enable_animations].join();
-        if (parent !== this.actor.get_parent() || key !== this.geometry?.key) {
-            this.suspend();
-            if (parent !== this.actor.get_parent()) {
-                this.actor.get_parent()?.remove_child(this.actor);
-                parent.add_child(this.actor);
-            }
+        const previousParent = this.actor.get_parent();
+        const moved = parent !== previousParent || x !== this.geometry?.localX ||
+            y !== this.geometry?.localY || placement.kind !== this.geometry?.kind;
+        if (moved || !placement.canWalk || !this.animationSettings.enable_animations) {
+            if (this.walkRequest)
+                this.cancelRequest();
+            if (this.timeline)
+                this.stopWalk();
+        }
+        if (parent !== previousParent) {
+            previousParent?.remove_child(this.actor);
+            parent.add_child(this.actor);
+        }
+        if (moved)
             this.actor.set_position(x, y);
-            this.geometry = {...geometry, card, seatShift: geometry.seatShift ?? 0, key};
-        }
+        this.geometry = {...placement, card, localX: x, localY: y};
         this.actor.z_position = anchor.z_position + 0.5;
         if (this.rest) {
-            this.body.opacity = 0;
             this.actor.show();
         } else if (!this.request && !this.failed) {
             this.loadRest();
         }
-        this.walkItem.setSensitive(this.canWalk());
-        if (!this.canWalk())
+        const canWalk = this.canWalk();
+        this.walkItem.setSensitive(canWalk);
+        if (!canWalk)
             this.clearTimer();
-        if (!this.timer)
+        else if (!this.timer)
             this.schedule();
         this.updateListening();
     }
 
-    locate(clock, label, body) {
-        const [bodyX, bodyY] = body.get_transformed_position();
-        const [bodyWidth, bodyHeight] = body.get_transformed_size();
-        if (clock?.mapped && label?.mapped && label.has_allocation()) {
-            const [x, y] = label.get_transformed_position();
-            const [offsetX, offsetY] = label.get_layout_offsets();
-            const track = measureTrack(label.get_layout(), x + offsetX, y + offsetY, walk.pivot[1]);
-            if (track) {
-                const monitor = global.display.get_monitor_index_for_rect(
-                    new Mtk.Rectangle({x: Math.round(track.right - 1), y: Math.round(track.top), width: 1, height: 1}));
-                if (Main.layoutManager.monitors[monitor]) {
-                    const [clockX] = clock.get_transformed_position();
-                    const [clockWidth] = clock.get_transformed_size();
-                    const geometry = placeOnTrack(track, Main.layoutManager.getWorkAreaForMonitor(monitor),
-                        walk, clockX + clockWidth - 2);
-                    if (geometry)
-                        return geometry;
-                }
-            }
-        }
-        return {x: bodyX + (bodyWidth - walk.width) / 2, y: bodyY + bodyHeight - walk.height,
-            width: walk.width, height: walk.height, canWalk: false};
+    clockPlacement(widget, label, bodyMonitor) {
+        if (!widget?.mapped)
+            return null;
+        const bounds = boundsFor(widget);
+        if (!bounds)
+            return {pending: true};
+        const clock = {...bounds, dragging: widget._isDragging};
+        if (bodyMonitor !== bounds.monitor || !label?.mapped || clock.dragging)
+            return clock;
+        if (!label.has_allocation())
+            return {...clock, trackPending: true};
+        const [x, y] = label.get_transformed_position();
+        const [offsetX, offsetY] = label.get_layout_offsets();
+        const track = measureTrack(label.get_layout(), x + offsetX, y + offsetY, walk.pivot[1]);
+        return {...clock, track, rightWall: bounds.x + bounds.width - 2,
+            area: Main.layoutManager.monitors[bounds.monitor]
+                ? Main.layoutManager.getWorkAreaForMonitor(bounds.monitor) : null};
     }
 
-    covered(geometry) {
+    windowBounds() {
         const workspace = global.workspace_manager.get_active_workspace();
-        // shortcut: any intersecting window suppresses the pilot, refine for partial occlusion after profiling.
-        return [...this.windows].some(actor => {
+        // GNOME occludes the sprite itself. Window overlap only gates new walks.
+        const bounds = [];
+        for (const actor of this.windows) {
             const window = actor.meta_window;
-            return actor.mapped && window && !window.minimized &&
+            if (actor.mapped && window && !window.minimized &&
                 window.get_window_type() !== Meta.WindowType.DESKTOP &&
-                window.located_on_workspace(workspace) && overlaps(geometry, window.get_frame_rect());
-        });
+                window.located_on_workspace(workspace))
+                bounds.push(window.get_frame_rect());
+        }
+        return bounds;
     }
 
     canWalk() {
-        return Boolean(this.geometry?.canWalk && this.rest && !this.failed && !this.request &&
+        return Boolean(this.geometry?.canWalk && !this.geometry.routeCovered && !this.placementPending &&
+            this.rest && !this.failed && !this.request &&
             !this.timeline && !this.wantsListening() && !this.listeningScene?.busy &&
             this.animationSettings.enable_animations);
     }
@@ -363,8 +383,6 @@ export class AvatarPilot {
             if (this.request === request) {
                 this.rest = upload(bytes);
                 this.actor.content = this.rest;
-                this.body.opacity = 0;
-                this.actor.show();
             }
         } catch (error) {
             this.assetError(request, error);
@@ -379,14 +397,14 @@ export class AvatarPilot {
             return;
         this.clearTimer();
         const request = new Gio.Cancellable();
-        this.request = request;
+        this.request = this.walkRequest = request;
         try {
             const count = walk.travel.length - 2;
             const bytes = await this.readFrames('walk', count, request);
             if (this.request !== request)
                 return;
             const frames = await this.prepareTextures(bytes, count);
-            if (this.request === request && frames)
+            if (this.request === request && frames && !this.geometry.routeCovered && !this.placementPending)
                 this.play([this.rest, ...frames, this.rest]);
         } catch (error) {
             this.assetError(request, error);
@@ -431,6 +449,8 @@ export class AvatarPilot {
         if (this.request !== request)
             return;
         this.failed = true;
+        if (!this.rest && this.body)
+            this.body.opacity = this.bodyOpacity;
         console.warn(`Avatar pilot: ${error.message}`);
     }
 
@@ -438,6 +458,8 @@ export class AvatarPilot {
         if (this.request !== request)
             return;
         this.request = null;
+        if (this.walkRequest === request)
+            this.walkRequest = null;
         this.walkItem.setSensitive(this.canWalk());
         this.schedule();
     }
@@ -500,13 +522,17 @@ export class AvatarPilot {
         this.clearTimer();
         if (!active && !this.actor?.visible)
             return;
-        this.request?.cancel();
-        this.request = null;
-        this.cancelUpload?.();
+        this.cancelRequest();
         this.listeningScene?.reset();
         this.stopWalk();
         this.menu?.close();
         this.actor.hide();
+    }
+
+    cancelRequest() {
+        this.request?.cancel();
+        this.request = this.walkRequest = null;
+        this.cancelUpload?.();
     }
 
     disablePilot(error) {
@@ -524,10 +550,7 @@ export class AvatarPilot {
         if (this.playerWatch)
             Gio.bus_unwatch_name(this.playerWatch);
         this.playerWatch = 0;
-        for (const id of this.playerSignals ?? [])
-            this.player.disconnect(id);
-        this.playerSignals = [];
-        this.player = null;
+        this.unwatchPlayer();
         this.listeningScene?.destroy();
         this.listeningScene = null;
         if (this.body && this.body.get_parent())

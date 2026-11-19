@@ -86,8 +86,6 @@ export class ListeningScene {
     }
 
     configure(view, mode, rain, animated) {
-        if (!listening)
-            return;
         this.mode = mode;
         this.rain = rain;
         this.view = view;

@@ -17,8 +17,13 @@ from .bridge.gnome import ANCHORS, AzClockHost, HostError
 from .bridge.integration import install_bridge
 from .bridge.session import APP_ID, Session
 from .settings import CARD_STYLES, CardEditor, STYLES, THEMES, WIDGETS, theme_preview
+from .widgets.ayah.preview import AyahPreview, thumbnail
+from .widgets.ayah.themes import SIZING as AYAH_SIZING
+from .widgets.ayah.themes import SPEC as AYAH_SPEC
 
 EXTENSIONS_URL = "https://extensions.gnome.org/extension/5156/desktop-clock/"
+AYAH_COLUMNS = ("Lantern", "Blueprint", "Oasis", "Warm Earth", "Graphite")
+SETTINGS_MIN_WIDTH = 890
 
 
 def _row(group, title, control, subtitle=None):
@@ -50,12 +55,22 @@ def _actions(group, apply, cancel):
     return commit, discard
 
 
+def _percentage():
+    scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 100, 1)
+    scale.set_size_request(162, -1)
+    scale.set_draw_value(True)
+    scale.set_format_value_func(lambda _, value, *unused: f"{value:.0f}%")
+    return scale
+
+
 class CardPage:
     def __init__(self, page, name, window):
         self.host = window.host
         self.notify = window.notify
         self.name = name
-        self.editor = CardEditor(name, self.host.card(name))
+        custom = self.host.card(name, custom=True) if name == "ayah" else None
+        preset_options = self.host.ayah_preset_options() if name == "ayah" else None
+        self.editor = CardEditor(name, self.host.card(name), custom, preset_options)
         self.refreshing = False
 
         gallery = Adw.PreferencesGroup(title="Themes")
@@ -64,42 +79,63 @@ class CardPage:
         grid = Gtk.Grid(column_spacing=8, row_spacing=8, column_homogeneous=True)
         self.tiles = {}
         previous = None
-        for index, theme in enumerate((*THEMES[name], "Custom")):
+        if name == "ayah":
+            ordered = [f"{family} {variant}" for variant in ("A", "B") for family in AYAH_COLUMNS
+                       if f"{family} {variant}" in THEMES[name]]
+            choices = [(theme, index % 5, index // 5) for index, theme in enumerate((*ordered, "Custom"))]
+        else:
+            choices = [(theme, index % 3, index // 3) for index, theme in enumerate((*THEMES[name], "Custom"))]
+        for theme, column, row in choices:
             tile = Gtk.ToggleButton(hexpand=True)
             tile.update_property([Gtk.AccessibleProperty.LABEL], [theme])
             if previous is not None:
                 tile.set_group(previous)
             previous = tile
             content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
-            miniature = Gtk.Label(wrap=True, justify=Gtk.Justification.CENTER)
-            miniature.set_size_request(-1, 68)
+            if name == "ayah":
+                tile_card = self.editor.custom if theme == "Custom" else theme_preview(name, theme, self.editor.draft)
+                miniature = thumbnail(tile_card)
+                css = None
+            else:
+                miniature = Gtk.Label(wrap=True, justify=Gtk.Justification.CENTER)
+                miniature.set_size_request(-1, 68)
+                css = Gtk.CssProvider()
+                miniature.get_style_context().add_provider(css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
             title = Gtk.Label(label=theme)
             title.add_css_class("caption")
             content.append(miniature)
             content.append(title)
             tile.set_child(content)
-            css = Gtk.CssProvider()
-            miniature.get_style_context().add_provider(css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
             tile.connect("toggled", self.choose_theme, theme)
-            grid.attach(tile, index % 3, index // 3, 1, 1)
+            grid.attach(tile, column, row, 1, 1)
             self.tiles[theme] = (tile, miniature, css)
         gallery.add(grid)
 
         preview = Adw.PreferencesGroup(title="Preview")
         page.add(preview)
-        self.sample = Gtk.Label(wrap=True, justify=Gtk.Justification.CENTER, halign=Gtk.Align.CENTER)
-        self.css = Gtk.CssProvider()
-        self.sample.get_style_context().add_provider(self.css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
-        preview.add(self.sample)
+        if name == "ayah":
+            self.sample = AyahPreview(self.host.element(name))
+            preview.add(self.sample.widget)
+        else:
+            self.sample = Gtk.Label(wrap=True, justify=Gtk.Justification.CENTER, halign=Gtk.Align.CENTER)
+            self.css = Gtk.CssProvider()
+            self.sample.get_style_context().add_provider(self.css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+            preview.add(self.sample)
 
         group = Adw.PreferencesGroup(title="Appearance")
+        if name == "ayah":
+            group.set_description("Editing a preset copies its appearance to Custom.")
         page.add(group)
-        self.transparency = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 100, 1)
-        self.transparency.set_size_request(162, -1)
-        self.transparency.set_draw_value(True)
-        self.transparency.set_format_value_func(lambda _, value, *unused: f"{value:.0f}%")
-        self.transparency.connect("value-changed", lambda control: self.edit(transparency=round(control.get_value())))
-        _row(group, "Box transparency", self.transparency, "100% leaves the wallpaper visible through the card.")
+        self.transparency = _percentage()
+        if name == "ayah":
+            self.transparency.connect("value-changed", lambda control: self.edit(transparency=100 - round(control.get_value())))
+            _row(group, "Background opacity", self.transparency)
+            self.text_opacity = _percentage()
+            self.text_opacity.connect("value-changed", lambda control: self.edit(text_opacity=round(control.get_value())))
+            _row(group, "Text opacity", self.text_opacity)
+        else:
+            self.transparency.connect("value-changed", lambda control: self.edit(transparency=round(control.get_value())))
+            _row(group, "Box transparency", self.transparency, "100% leaves the wallpaper visible through the card.")
 
         self.style = _choice(STYLES)
         _row(group, "Card style", self.style)
@@ -123,12 +159,25 @@ class CardPage:
         self.fonts = ["", *sorted(available - {""}, key=lambda font: (font.casefold(), font))]
         self.font = _choice(("System font", *self.fonts[1:]))
         self.font.set_enable_search(True)
-        _row(group, "Default font", self.font, "The renderer can specify fonts for individual lines.")
+        _row(group, "English font" if name == "ayah" else "Default font", self.font)
         self.font.connect("notify::selected", lambda dropdown, _: self.edit(font=self.fonts[dropdown.get_selected()]))
+        if name == "ayah":
+            self.arabic_fonts = ["", *AYAH_SPEC["arabic_fonts"]]
+            self.arabic_font = _choice(("Amiri (default)", *self.arabic_fonts[1:]))
+            _row(group, "Arabic font", self.arabic_font)
+            self.arabic_font.connect("notify::selected",
+                                     lambda dropdown, _: self.edit(arabic_font=self.arabic_fonts[dropdown.get_selected()]))
 
         self.size = Gtk.SpinButton.new_with_range(8, 48, 1)
-        self.width = Gtk.SpinButton.new_with_range(360, 1000, 10)
-        _row(group, "Base text size", self.size, "Points")
+        self.width = Gtk.SpinButton.new_with_range(
+            AYAH_SIZING["min_width"] if name == "ayah" else 360,
+            AYAH_SIZING["max_width"] if name == "ayah" else 1000, 10,
+        )
+        if name == "ayah":
+            self.arabic_size = Gtk.SpinButton.new_with_range(AYAH_SIZING["min_size"], AYAH_SIZING["max_arabic_size"], 1)
+            self.arabic_size.connect("value-changed", lambda control: self.edit(arabic_size=control.get_value_as_int()))
+            _row(group, "Arabic text size", self.arabic_size, "Points")
+        _row(group, "English text size" if name == "ayah" else "Base text size", self.size, "Points")
         _row(group, "Box width", self.width, "Pixels")
         self.size.connect("value-changed", lambda control: self.edit(size=control.get_value_as_int()))
         self.width.connect("value-changed", lambda control: self.edit(width=control.get_value_as_int()))
@@ -159,14 +208,24 @@ class CardPage:
             card = self.editor.draft
             for theme, (button, label, css) in self.tiles.items():
                 button.set_active(theme == self.editor.theme)
-                tile_card = self.editor.custom if theme == "Custom" else theme_preview(self.name, theme, card)
-                self.render_sample(tile_card, label, css, miniature=True)
-            self.transparency.set_value(card.transparency)
+                if css:
+                    tile_card = self.editor.custom if theme == "Custom" else theme_preview(self.name, theme, card)
+                    self.render_sample(tile_card, label, css, miniature=True)
+                elif theme == "Custom":
+                    thumbnail(self.editor.custom, overlay=label)
+            self.transparency.set_value(100 - card.transparency if self.name == "ayah" else card.transparency)
             self.style.set_selected(STYLES.index(card.style))
             if card.font not in self.fonts:
                 self.fonts.append(card.font)
                 self.font.get_model().append(card.font)
             self.font.set_selected(self.fonts.index(card.font))
+            if self.name == "ayah":
+                self.text_opacity.set_value(card.text_opacity)
+                if card.arabic_font not in self.arabic_fonts:
+                    self.arabic_fonts.append(card.arabic_font)
+                    self.arabic_font.get_model().append(card.arabic_font)
+                self.arabic_font.set_selected(self.arabic_fonts.index(card.arabic_font))
+                self.arabic_size.set_value(card.arabic_size)
             self.size.set_value(card.size)
             self.width.set_value(card.width)
             self.use_preview_colour.set_visible(not card.background_readable)
@@ -174,8 +233,11 @@ class CardPage:
                 rgba = Gdk.RGBA()
                 rgba.parse(getattr(card, field))
                 button.set_rgba(rgba)
-            self.render_sample(card, self.sample, self.css)
-            self.sample.set_size_request(max(180, min(490, round(card.width / 1.7))), -1)
+            if self.name == "ayah":
+                self.sample.render(card)
+            else:
+                self.render_sample(card, self.sample, self.css)
+                self.sample.set_size_request(max(180, min(490, round(card.width / 1.7))), -1)
             self.apply_button.set_sensitive(self.editor.dirty)
             self.cancel_button.set_sensitive(self.editor.dirty)
         finally:
@@ -190,30 +252,18 @@ class CardPage:
             f"label {{ background-color: alpha({card.background}, {opacity}); color: {card.text}; "
             f"border: {border}px solid {card.accent}; border-radius: {radius}px; padding: {padding}px; }}"
         )
-        if self.name == "ayah":
-            arabic_size = 12 if miniature else card.size + 9
-            translation_size = 8 if miniature else card.size
-            content = (
-                f'<span font_family="Amiri, Noto Naskh Arabic" size="{arabic_size}pt">'
-                'فَإِنَّ مَعَ الْعُسْرِ يُسْرًا</span>\n'
-                f'<span foreground="{card.accent}">━━━━</span>\n'
-                f'<span size="{translation_size}pt">Indeed, with hardship comes ease.</span>'
-            )
-            if not miniature:
-                content += '\n<small>Ash-Sharh · 94:5</small>'
-        else:
-            now = datetime.now()
-            time = "16:40" if miniature else f"{now:%H:%M:%S}"
-            size = 20 if miniature else card.size + 16
-            date = "Wednesday, 18 November" if miniature else escape(now.strftime("%A, %d %B"))
-            content = (
-                f'<span size="{size}pt">{time}</span>\n'
-                f'<span size="{8 if miniature else card.size}pt">{date}</span>\n'
-                f'<span foreground="{card.accent}">━━━━━━━</span>'
-                f'<span foreground="{card.accent}" alpha="35%">━━━</span>'
-            )
-            if not miniature:
-                content += '\n<small>Day progress</small>'
+        now = datetime.now()
+        time = "16:40" if miniature else f"{now:%H:%M:%S}"
+        size = 20 if miniature else card.size + 16
+        date = "Wednesday, 18 November" if miniature else escape(now.strftime("%A, %d %B"))
+        content = (
+            f'<span size="{size}pt">{time}</span>\n'
+            f'<span size="{8 if miniature else card.size}pt">{date}</span>\n'
+            f'<span foreground="{card.accent}">━━━━━━━</span>'
+            f'<span foreground="{card.accent}" alpha="35%">━━━</span>'
+        )
+        if not miniature:
+            content += '\n<small>Day progress</small>'
         if card.font:
             content = f'<span font_family="{escape(card.font, quote=True)}">{content}</span>'
         label.set_markup(content)
@@ -221,16 +271,19 @@ class CardPage:
     def apply(self):
         try:
             current = self.host.apply_card(self.name, self.editor.saved, self.editor.changes())
+            custom = self.host.card(self.name, custom=True) if self.name == "ayah" and current.theme != "Custom" else None
         except (HostError, ValueError, GLib.Error) as exc:
             self.notify(str(exc))
             return
-        self.editor.mark_saved(current)
+        self.editor.mark_saved(current, custom)
         self.render()
         self.notify("Appearance saved")
 
     def cancel(self):
         try:
-            self.editor.cancel(self.host.card(self.name))
+            custom = self.host.card(self.name, custom=True) if self.name == "ayah" else None
+            options = self.host.ayah_preset_options() if self.name == "ayah" else None
+            self.editor.cancel(self.host.card(self.name), custom, options)
         except (HostError, GLib.Error) as exc:
             self.notify(str(exc))
             return
@@ -330,7 +383,8 @@ class PlacementPage:
 
 class SettingsWindow(Adw.ApplicationWindow):
     def __init__(self, application, host, host_message):
-        super().__init__(application=application, title="Desktop Widgets", default_width=860, default_height=660)
+        super().__init__(application=application, title="Desktop Widgets", default_width=940, default_height=720)
+        self.set_size_request(SETTINGS_MIN_WIDTH, -1)
         self.host = host
         self.switches = {}
         self.toast = Adw.ToastOverlay()

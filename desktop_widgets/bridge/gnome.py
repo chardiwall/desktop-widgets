@@ -10,11 +10,16 @@ import gi
 gi.require_version("Gdk", "4.0")
 from gi.repository import Gdk, Gio, GLib
 
-from ..settings import CARD_STYLES, Card, validate_card
+from ..settings import AYAH_APPEARANCE, AYAH_EXTRAS, AYAH_OPTIONS, CARD_STYLES, THEME_FIELDS, Card, theme_preview, validate_card
+from ..widgets.ayah.themes import PRESETS, SIZING
 
 SCHEMA = "org.gnome.shell.extensions.azclock"
 PATH = "/org/gnome/shell/extensions/azclock/"
 EXTENSION = "azclock@azclock.gitlab.com"
+APP_SCHEMA = "io.github.desktopwidgets.Settings"
+AYAH_THEME = "ayah-theme"
+AYAH_CUSTOM = "ayah-custom"
+AYAH_PRESET_OPTIONS = "ayah-preset-options"
 ELEMENTS = {"ayah": "verse", "clock": "card", "avatar": "body"}
 DICTIONARY = GLib.VariantType.new("a{sv}")
 CARD_WIDTH = re.compile(r"((?:^|;)\s*width:\s*)(\d+)px\b")
@@ -91,10 +96,16 @@ def _shell_call(name, path, method, parameters=None):
 
 
 class AzClockHost:
-    def __init__(self, source, backend=None):
+    def __init__(self, source, backend=None, app_source=None):
         self.source = source
         self.backend = backend
         self.root = self._settings(SCHEMA)
+        app_source = app_source or Gio.SettingsSchemaSource.get_default()
+        schema = app_source.lookup(APP_SCHEMA, True) if app_source else None
+        self.appearance = Gio.Settings.new_full(schema, backend, None) if schema and schema.has_key(AYAH_THEME) else None
+        self.has_custom_ayah = self.appearance is not None and all(
+            schema.has_key(key) for key in (AYAH_CUSTOM, AYAH_PRESET_OPTIONS)
+        )
 
     @classmethod
     def discover(cls):
@@ -181,7 +192,7 @@ class AzClockHost:
         return self._settings(SCHEMA + ".element-data",
                               f"{PATH}widget-data/{name}/element-data/{ELEMENTS[name]}/")
 
-    def card(self, name):
+    def _native_card(self, name):
         if name not in self.visibility() or name == "avatar":
             raise HostError("This card is not configured in Desktop Widgets.")
         frame, label = self.widget(name), self.element(name)
@@ -198,14 +209,38 @@ class AzClockHost:
         transparency = round(100 * (1 - background.alpha)) if background is not None else 0
         if not frame.get_boolean("show-background"):
             transparency = 100
+        size = label.get_int("font-size")
         return Card(
             transparency=transparency, style=style, background=_hex_colour(background, defaults.background),
             background_readable=background is not None,
             text=_hex_colour(_parse_colour(label.get_string("foreground-color")), defaults.text),
             accent=_hex_colour(_parse_colour(label.get_string("border-color")), defaults.accent),
-            font=font if override else "", size=label.get_int("font-size"),
-            width=int(width[2]) if width else defaults.width,
+            font=font if override else "", size=size,
+            arabic_size=size + SIZING["arabic_extra"] if name == "ayah" else defaults.arabic_size,
+            width=int(width[2]) if width else (SIZING["width"] if name == "ayah" else defaults.width),
         )
+
+    def ayah_preset_options(self, native=None):
+        native = native or self._native_card("ayah")
+        saved = self.appearance.get_value(AYAH_PRESET_OPTIONS).unpack() if self.has_custom_ayah else (-1, -1, -1)
+        options = {key: value if value >= 0 else getattr(native, key) for key, value in zip(AYAH_OPTIONS, saved, strict=True)}
+        options["arabic_size"] = options["size"] + SIZING["arabic_extra"]
+        return options
+
+    def _custom_ayah(self, native, active):
+        stored = self.appearance.get_value(AYAH_CUSTOM).unpack() if self.has_custom_ayah else {}
+        fields = AYAH_APPEARANCE if active in PRESETS else AYAH_EXTRAS
+        custom = replace(native, **{key: stored[key] for key in fields if key in stored})
+        return custom if "arabic_size" in stored else replace(custom, arabic_size=custom.size + SIZING["arabic_extra"])
+
+    def card(self, name, *, custom=False):
+        native = self._native_card(name)
+        if name != "ayah" or not self.appearance:
+            return native
+        theme = self.appearance.get_string(AYAH_THEME)
+        if not custom and theme in PRESETS:
+            return theme_preview(name, theme, replace(native, **self.ayah_preset_options(native)))
+        return self._custom_ayah(native, theme)
 
     def apply_card(self, name, saved, changes):
         current = self.card(name)
@@ -215,6 +250,31 @@ class AzClockHost:
             raise HostError("This card changed in GNOME. Cancel to reload its current settings.")
         card = replace(current, **changes)
         validate_card(card)
+        appearance_values = {}
+        if name == "ayah":
+            if card.theme != "Custom" and card.theme not in PRESETS:
+                raise ValueError("Choose an available Ayah theme.")
+            if card.art_theme and card.art_theme not in PRESETS:
+                raise ValueError("Choose an available Ayah design.")
+            extra_changes = changes.keys() & {"theme", *AYAH_EXTRAS}
+            if extra_changes and not self.has_custom_ayah:
+                raise HostError("Install the updated Desktop Widgets settings schema to save Ayah themes.")
+            native = self._native_card(name)
+            if self.has_custom_ayah:
+                saved_custom = self._custom_ayah(native, current.theme) if card.theme in PRESETS else card
+                snapshot = {}
+                for key in AYAH_APPEARANCE:
+                    value = getattr(saved_custom, key)
+                    snapshot[key] = GLib.Variant("i" if isinstance(value, int) else "s", value)
+                preset_options = self.ayah_preset_options(native)
+                appearance_values = {
+                    AYAH_THEME: GLib.Variant("s", card.theme),
+                    AYAH_CUSTOM: GLib.Variant("a{sv}", snapshot),
+                    AYAH_PRESET_OPTIONS: GLib.Variant("(iii)", tuple(preset_options[key] for key in AYAH_OPTIONS)),
+                }
+            # Project the effective appearance onto AzClock so an already-running legacy renderer updates too.
+            changes = {key: getattr(card, key) for key in (*THEME_FIELDS, "size", "width", "transparency")
+                       if getattr(card, key) != getattr(native, key) or key in changes}
         frame_values = {}
         label_values = {}
         if {"background", "transparency"} & changes.keys():
@@ -238,6 +298,8 @@ class AzClockHost:
             label_values["foreground-color"] = GLib.Variant("s", card.text)
         if "accent" in changes:
             label_values["border-color"] = GLib.Variant("s", card.accent)
+            if name == "ayah":
+                frame_values["border-color"] = GLib.Variant("s", card.accent)
         if "font" in changes:
             # AzClock inserts the family into a double-quoted CSS string.
             if '"' in card.font or "\\" in card.font:
@@ -260,7 +322,7 @@ class AzClockHost:
                 background = background.rstrip("; ") + f"; width: {card.width}px"
             label_values["show-background"] = GLib.Variant("b", True)
             label_values["background-color"] = GLib.Variant("s", background)
-        _write((frame, frame_values), (label, label_values))
+        _write((frame, frame_values), (label, label_values), (self.appearance, appearance_values))
         return self.card(name)
 
     def displays(self):

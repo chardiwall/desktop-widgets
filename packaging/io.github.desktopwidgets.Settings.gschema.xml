@@ -1,5 +1,17 @@
 <schemalist>
   <schema id="io.github.desktopwidgets.Settings" path="/io/github/desktopwidgets/settings/">
+    <key name="ayah-theme" type="s">
+      <default>'Custom'</default>
+      <summary>Selected Ayah reminder theme and variant</summary>
+    </key>
+    <key name="ayah-custom" type="a{sv}">
+      <default>{}</default>
+      <summary>Independent Custom appearance and the preset artwork it copied</summary>
+    </key>
+    <key name="ayah-preset-options" type="(iii)">
+      <default>(-1, -1, -1)</default>
+      <summary>Text size, width and background transparency inherited by the Ayah presets</summary>
+    </key>
     <key name="shell-session" type="s">
       <default>''</default>
       <summary>GNOME Shell session that owns temporary visibility state</summary>

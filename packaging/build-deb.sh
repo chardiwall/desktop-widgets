@@ -14,9 +14,16 @@ sh packaging/build-native.sh "$staging/native"
 library="$staging/usr/lib/$package"
 install -d "$staging/DEBIAN" "$library/desktop_widgets"
 for file in desktop_widgets/*.py desktop_widgets/bridge/*.py desktop_widgets/bridge/*.js \
-    desktop_widgets/widgets/ayah/*.py desktop_widgets/widgets/clock/*.py desktop_widgets/widgets/avatar/*.js; do
+    desktop_widgets/widgets/ayah/*.py desktop_widgets/widgets/ayah/*.js desktop_widgets/widgets/ayah/*.json \
+    desktop_widgets/widgets/ayah/art/* desktop_widgets/widgets/clock/*.py desktop_widgets/widgets/avatar/*.js; do
     install -D -m 644 "$file" "$library/$file"
 done
+for font in desktop_widgets/widgets/ayah/fonts/*/*.ttf; do
+    family=$(basename "$(dirname "$font")")
+    install -D -m 644 "$font" "$staging/usr/share/fonts/truetype/desktop-widgets/$(basename "$font")"
+    install -D -m 644 "$(dirname "$font")/OFL.txt" "$staging/usr/share/doc/$package/fonts/$family/OFL.txt"
+done
+install -D -m 644 desktop_widgets/widgets/ayah/fonts/README.md "$staging/usr/share/doc/$package/fonts/README.md"
 /usr/bin/python3 packaging/stage-avatar.py --pack-only \
     "${1:-dist/avatar-walk}" "$library/desktop_widgets/widgets/avatar" \
     --listening "${2:-dist/avatar-listening}"

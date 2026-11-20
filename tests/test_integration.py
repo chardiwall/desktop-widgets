@@ -14,9 +14,21 @@ from desktop_widgets.bridge.integration import MARKER, PANEL_MARKER, prepare_ext
 SOURCE = """import {UpdateNotification} from './updateNotification.js';
 
 class DesktopWidget {
+    vfunc_allocate(box) {
+        const {x, y} = this._getPosition();
+        box.set_origin(x, y);
+    }
+
     createElements() {
+        if (element)
+                this._elements.set(elementId, element);
+            this.add_child(element);
         this._oldElementIds = elementIds;
         this.queue_relayout();
+    }
+
+    setStyle() {
+        this.style = style;
     }
 
     _onDragBegin() {
@@ -65,6 +77,7 @@ class IntegrationPatchTest(unittest.TestCase):
         self.assertEqual(patch_extension(patched), patched)
         self.assertIn(MARKER, patched)
         self.assertIn(PANEL_MARKER, patched)
+        self.assertIn("element._ayahCard = decorateAyah(this, element, elementSettings);", patched)
         self.assertIn("this._widgetIndicator?.displayedWidgets(widgetIds)", patched)
         self.assertNotIn(integration.LEGACY_AVATAR_MARKER, patched)
         self.assertIn("this.widgets.has('avatar')", patched)
@@ -89,6 +102,15 @@ class IntegrationPatchTest(unittest.TestCase):
         )
         versioned = f"{integration.RELEASES}/{'a' * 64}/desktop_widgets"
         self.assertEqual(patch_extension(legacy.replace(integration.BUNDLE, versioned)), patched)
+
+    def test_upgrades_the_old_ayah_ornament_hook(self):
+        patched = patch_extension(SOURCE)
+        legacy = patched.replace(integration.AYAH_IMPORT, integration.LEGACY_AYAH_IMPORT).replace(
+            integration.AYAH_ATTACH, integration.LEGACY_AYAH_ATTACH
+        )
+        for match, replacement in integration.AYAH_FRAME:
+            legacy = legacy.replace(replacement, match)
+        self.assertEqual(patch_extension(legacy), patched)
 
     def test_preparation_refuses_ambiguous_hooks_without_writing(self):
         with TemporaryDirectory() as temp:
@@ -154,6 +176,7 @@ class InstallationFailureTest(unittest.TestCase):
         self.enterContext(patch.object(integration.GLib, "get_user_data_dir", return_value=str(data)))
         self.enterContext(patch.object(Path, "home", return_value=home))
         self.enterContext(patch.object(integration, "bundle_assets", return_value=self.assets))
+        self.enterContext(patch.object(integration.AzClockHost, "discover"))
         self.enterContext(patch("builtins.print"))
 
     def assert_previous_bundle(self):

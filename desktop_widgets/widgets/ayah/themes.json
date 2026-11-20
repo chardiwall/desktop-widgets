@@ -1,0 +1,105 @@
+{
+  "sizing": {
+    "width": 460, "min_width": 360, "max_width": 1000,
+    "height": 220, "min_height": 180, "scenery_scale_max": 1.16,
+    "min_size": 8, "max_arabic_size": 55, "reductions": [1, 0.98, 0.96, 0.94, 0.92],
+    "gap": 8, "rule_width": 28, "rule_height": 2, "margin": 12,
+    "arabic_extra": 7, "arabic_padding": 12, "reference_scale": 0.77,
+    "arabic_ink_gap": 2, "footer_tint": 0.34, "footer_fade": 56
+  },
+  "arabic_fonts": ["Amiri", "Cairo Play", "Reem Kufi Fun", "Mada", "Google Sans"],
+  "arabic_leading": {"Amiri": 1.0, "Cairo Play": 0.95, "Reem Kufi Fun": 1.0, "Mada": 0.95, "Google Sans": 0.94},
+  "custom": {
+    "arabic_font": "Amiri",
+    "font": "sans-serif",
+    "padding": [16, 22, 16, 22]
+  },
+  "themes": {
+    "Lantern A": {
+      "style": "Solid", "background": "#241b30", "text": "#fff0d7", "accent": "#ffbc72",
+      "arabic_font": "Amiri", "font": "Literata",
+      "radius": 17, "border": 1, "padding": [16, 26, 16, 22],
+      "art": [
+        {"file": "lantern-a-mosque.png", "anchor": "bottom-right", "width": 425, "ratio": 3.9122, "opacity": 0.85, "scenery": true},
+        {"file": "lantern-a-lantern.png", "anchor": "top-left", "width": 124, "ratio": 0.7643, "opacity": 0.99}
+      ]
+    },
+    "Lantern B": {
+      "style": "Solid", "background": "#251c35", "text": "#fff0d7", "accent": "#eab277",
+      "arabic_font": "Amiri", "font": "Agrave Pro",
+      "radius": 17, "border": 1, "padding": [17, 24, 16, 22],
+      "art": [
+        {"file": "lantern-b-filigree.svg", "anchor": "bottom-right", "width": 328, "ratio": 2.4296, "opacity": 0.88, "scenery": true},
+        {"file": "lantern-b-star.svg", "anchor": "top-left", "width": 76, "ratio": 1, "opacity": 0.75, "inset": [7, 9]},
+        {"file": "lantern-b-moon.svg", "anchor": "top-right", "width": 76, "ratio": 0.9545, "opacity": 0.72}
+      ]
+    },
+    "Blueprint A": {
+      "style": "Glass", "background": "#14263c", "text": "#eef7ff", "accent": "#86d6ed",
+      "arabic_font": "Google Sans", "font": "Firjar",
+      "radius": 17, "border": 1, "padding": [16, 34, 16, 22],
+      "art": [
+        {"file": "blueprint-a-arches.png", "anchor": "bottom-right", "width": 354, "ratio": 2.298, "opacity": 0.82, "scenery": true},
+        {"file": "blueprint-a-lattice.svg", "anchor": "top-left", "width": 128, "ratio": 1.1864, "opacity": 0.45}
+      ]
+    },
+    "Oasis A": {
+      "style": "Glass", "background": "#192e27", "text": "#f5f3e8", "accent": "#aed59a",
+      "arabic_font": "Mada", "font": "Literata",
+      "radius": 17, "border": 1, "padding": [16, 28, 16, 22],
+      "art": [
+        {"file": "oasis-a-pond.png", "anchor": "bottom-right", "width": 330, "ratio": 2.497, "opacity": 0.79, "scenery": true},
+        {"file": "oasis-a-leaves.png", "anchor": "top-left", "width": 120, "ratio": 1.073, "opacity": 0.90}
+      ]
+    },
+    "Oasis B": {
+      "style": "Glass", "background": "#1b3028", "text": "#fff7e8", "accent": "#b9d89b",
+      "arabic_font": "Mada", "font": "Indie Flower",
+      "radius": 17, "border": 1, "padding": [16, 72, 16, 22],
+      "art": [
+        {"file": "oasis-b-light.svg", "anchor": "bottom-right", "width": 295, "ratio": 4.5313, "opacity": 0.65, "scenery": true},
+        {"file": "oasis-b-vine.svg", "anchor": "top-left", "width": 107, "ratio": 1.0957, "opacity": 0.35},
+        {"file": "oasis-b-window.png", "anchor": "top-right", "width": 62, "ratio": 0.3619, "opacity": 0.54, "inset": [6, 10]},
+        {"file": "oasis-b-flowers.png", "anchor": "bottom-right", "width": 105, "ratio": 0.9642, "opacity": 0.92, "inset": [17, 8]}
+      ]
+    },
+    "Warm Earth A": {
+      "style": "Solid", "background": "#f1dcc3", "text": "#382419", "accent": "#a45331",
+      "arabic_font": "Amiri", "font": "Caveat",
+      "radius": 17, "border": 1, "padding": [15, 24, 21, 22],
+      "art": [
+        {"file": "warm-earth-a-dunes.png", "anchor": "bottom-right", "width": 480, "ratio": 6.5203, "opacity": 0.88, "scenery": true},
+        {"file": "warm-earth-a-filigree.svg", "anchor": "top-left", "width": 125, "ratio": 1.1961, "opacity": 0.82}
+      ]
+    },
+    "Warm Earth B": {
+      "style": "Solid", "background": "#ecd3b5", "text": "#382419", "accent": "#a15331",
+      "arabic_font": "Mada", "font": "Agrave Pro",
+      "radius": 17, "border": 1, "padding": [15, 53, 18, 22],
+      "art": [
+        {"file": "warm-earth-b-fort.png", "anchor": "bottom-right", "width": 396, "ratio": 3.5175, "opacity": 0.88, "scenery": true},
+        {"file": "warm-earth-b-arch.svg", "anchor": "top-left", "width": 74, "ratio": 0.7658, "opacity": 0.8, "inset": [8, 6]},
+        {"file": "warm-earth-b-palm.png", "anchor": "top-right", "width": 113, "ratio": 1.3011, "opacity": 0.63}
+      ]
+    },
+    "Graphite A": {
+      "style": "Minimal", "background": "#272533", "text": "#f6f0f8", "accent": "#c5a6da",
+      "arabic_font": "Google Sans", "font": "Google Sans",
+      "radius": 17, "border": 1, "padding": [16, 24, 18, 22],
+      "art": [
+        {"file": "graphite-a-ribbons.svg", "anchor": "bottom-right", "width": 310, "ratio": 2.5234, "opacity": 0.86, "scenery": true},
+        {"file": "graphite-a-vine.svg", "anchor": "top-left", "width": 118, "ratio": 1.2642, "opacity": 0.42},
+        {"file": "graphite-a-flowers.png", "anchor": "bottom-left", "width": 210, "ratio": 1.3619, "opacity": 0.93, "inset": [2, 3]}
+      ]
+    },
+    "Graphite B": {
+      "style": "Minimal", "background": "#262432", "text": "#f6f0f8", "accent": "#bb9bcd",
+      "arabic_font": "Google Sans", "font": "Firjar",
+      "radius": 17, "border": 1, "padding": [16, 25, 16, 22],
+      "art": [
+        {"file": "graphite-b-mountains.png", "anchor": "bottom-right", "width": 445, "ratio": 4.5311, "opacity": 0.82, "scenery": true},
+        {"file": "graphite-b-star.svg", "anchor": "top-right", "width": 110, "ratio": 0.9813, "opacity": 0.44}
+      ]
+    }
+  }
+}

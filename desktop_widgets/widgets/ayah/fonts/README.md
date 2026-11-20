@@ -1,0 +1,1 @@
+These unmodified font files and SIL Open Font Licenses come from the [Google Fonts repository](https://github.com/google/fonts/tree/cc5661d43cd4f9aad5567033a8e15ca28dc35c86/ofl). Each directory retains its upstream family name.

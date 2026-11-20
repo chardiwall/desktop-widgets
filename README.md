@@ -36,3 +36,13 @@ sh packaging/build-deb.sh &&
 ```
 
 The last command backs up a local AzClock 16.1 installation and transfers ownership from the legacy desktop avatar service. Log out and back in to load the bridge. The GNOME configuration needs the existing widget IDs `ayah/verse`, `clock/card` and `avatar/body`. For development, use the [isolated preview and checks](docs/avatar-pilot.md#verification).
+
+## Ayah screenshot check
+
+From a graphical session with AzClock and the bundled fonts installed, run this from the repository root.
+
+```sh
+/usr/bin/python3 tests/capture_ayah.py
+```
+
+The check renders short, multi-ayah, and long passages on fixed light and dark wallpapers at 45% card opacity. It also captures the end of the long passage at 160% text scale. Screenshots go to `dist/ayah-preview/regression/`. Use `--theme` to review a specific preset or `--quran-data` to point to a different directory containing the widget’s local `quran-uthmani.json` and `en.sahih.json` files.

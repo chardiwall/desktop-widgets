@@ -18,6 +18,7 @@ SCHEMA = """<schemalist>
     <key name="background-color" type="s"><default>'rgba(57,51,62,0.55)'</default></key>
     <key name="show-background" type="b"><default>true</default></key>
     <key name="show-border" type="b"><default>true</default></key>
+    <key name="border-color" type="s"><default>'black'</default></key>
     <key name="border-radius" type="i"><default>18</default></key>
     <key name="anchor-point" type="s"><default>'Top_Left'</default></key>
     <key name="location-data" type="s"><default>'{"monitorIndex":0,"relativeX":0.03,"relativeY":0.05}'</default></key>
@@ -48,11 +49,13 @@ class AzClockTest(unittest.TestCase):
         cls.addClassCleanup(cls.directory.cleanup)
         directory = Path(cls.directory.name)
         (directory / "azclock.gschema.xml").write_text(SCHEMA)
+        app_schema = Path(__file__).resolve().parents[1] / "packaging/io.github.desktopwidgets.Settings.gschema.xml"
+        (directory / app_schema.name).write_bytes(app_schema.read_bytes())
         subprocess.run(["glib-compile-schemas", "--strict", directory], check=True)
         cls.source = Gio.SettingsSchemaSource.new_from_directory(str(directory), None, False)
 
     def setUp(self):
-        self.host = AzClockHost(self.source, Gio.memory_settings_backend_new())
+        self.host = AzClockHost(self.source, Gio.memory_settings_backend_new(), self.source)
         self.entries = [
             entry("avatar"), entry("clock", position=GLib.Variant("u", 7)),
             entry("ayah"), entry("another-widget", detail=GLib.Variant("s", "unrelated widget")),
@@ -130,6 +133,49 @@ class AzClockTest(unittest.TestCase):
         label.set_string("background-color", "#334455; width: 600px")
         self.host.apply_card("ayah", self.host.card("ayah"), {"width": 720})
         self.assertEqual(label.get_string("background-color"), "#334455; width: 720px")
+
+    def test_ayah_apply_updates_the_native_card_and_preserves_independent_custom_appearance(self):
+        current = self.host.card("ayah")
+        editor = CardEditor("ayah", current)
+        editor.select_theme("Oasis B")
+        self.host.apply_card("ayah", current, editor.changes())
+        self.assertEqual(self.host.element("ayah").get_string("foreground-color"), "#fff7e8")
+        self.assertEqual(self.host.widget("ayah").get_string("border-color"), "#b9d89b")
+
+        reopened = AzClockHost(self.source, self.host.backend, self.source)
+        saved = reopened.card("ayah")
+        custom = reopened.card("ayah", custom=True)
+        self.assertEqual((saved.theme, saved.width, saved.transparency), ("Oasis B", current.width, current.transparency))
+        self.assertEqual(saved.arabic_size, saved.size + 7)
+        self.assertEqual((custom.font, custom.background), (current.font, current.background))
+        editor = CardEditor("ayah", saved, custom, reopened.ayah_preset_options())
+        editor.select_theme("Graphite B")
+        editor.cancel()
+        self.assertEqual(editor.theme, "Oasis B")
+
+        editor.edit(text_opacity=36, transparency=30, arabic_font="Amiri", arabic_size=31, width=460)
+        editor.edit(size=16)
+        custom = reopened.apply_card("ayah", editor.saved, editor.changes())
+        self.assertEqual((custom.theme, custom.art_theme, custom.font, custom.arabic_font),
+                         ("Custom", "Oasis B", "Indie Flower", "Amiri"))
+        self.assertEqual((custom.text_opacity, custom.transparency, custom.width), (36, 30, 460))
+        self.assertEqual((custom.arabic_size, custom.size), (31, 16))
+
+        editor = CardEditor("ayah", custom, preset_options=reopened.ayah_preset_options())
+        editor.select_theme("Oasis B")
+        preset = reopened.apply_card("ayah", editor.saved, editor.changes())
+        self.assertEqual((preset.text_opacity, preset.transparency, preset.arabic_font, preset.width),
+                         (100, current.transparency, "Mada", current.width))
+        self.assertEqual((preset.arabic_size, preset.size), (current.arabic_size, current.size))
+        editor = CardEditor("ayah", preset, reopened.card("ayah", custom=True))
+        editor.select_theme("Custom")
+        actual = reopened.apply_card("ayah", editor.saved, editor.changes())
+        self.assertEqual(actual, custom)
+
+    def test_english_resize_preserves_the_arabic_size_in_an_existing_custom_card(self):
+        current = self.host.card("ayah")
+        updated = self.host.apply_card("ayah", current, {"size": 18})
+        self.assertEqual((updated.arabic_size, updated.size), (current.arabic_size, 18))
 
     def test_enabling_avatar_brings_it_in_front_of_the_clock(self):
         self.host.root.set_value("widgets", GLib.Variant("aa{sv}", [

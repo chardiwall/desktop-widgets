@@ -9,15 +9,18 @@ from tempfile import NamedTemporaryFile, TemporaryDirectory
 
 from gi.repository import GLib
 
-from .gnome import EXTENSION, HostError
+from .gnome import AzClockHost, EXTENSION, HostError
+from ..widgets.ayah.themes import PRESETS as AYAH_PRESETS
 
 ROOT = Path(__file__).resolve().parents[1]
 BUNDLE = "desktop-widget-settings/desktop_widgets"
 RELEASES = "desktop-widget-settings/releases"
-BRIDGE_FILES = ("attachments.js", "indicator.js", "azclock-avatar.js", "listening.js", "track.js")
+BRIDGE_FILES = ("attachments.js", "ayah.js", "indicator.js", "azclock-avatar.js", "listening.js", "track.js")
 AVATAR_MODULES = ("motion.js", "placement.js")
 AVATAR_FRAMES = ("rest.rgba", "walk.rgba", "listening.rgba", "walk-data.js")
 MARKER = "import {displayedWidgets}"
+AYAH_MARKER = "import {decorateAyah}"
+AYAH_IMPORT = f"{AYAH_MARKER} from './{BUNDLE}/bridge/ayah.js';"
 LEGACY_ATTACHMENT_MARKER = "import {WidgetAttachments, displayedWidgets}"
 PANEL_MARKER = "import {WidgetIndicator}"
 HOOKS = (
@@ -27,6 +30,33 @@ HOOKS = (
      "        let widgetIds = [];"),
     ("        const deletedWidgets = this._oldWidgetIds.filter",
      "        widgetIds = displayedWidgets(widgetIds);\n        const deletedWidgets = this._oldWidgetIds.filter"),
+)
+LEGACY_AYAH_IMPORT = f"{AYAH_MARKER} from './{BUNDLE}/bridge/attachments.js';"
+LEGACY_AYAH_ATTACH = (
+    "                if (this._settingsId === 'ayah' && elementId === 'verse' && element.clutter_text)\n"
+    "                    decorateAyah(element);\n"
+)
+AYAH_ATTACH = (
+    "                if (this._settingsId === 'ayah' && elementId === 'verse' && element.clutter_text)\n"
+    "                    element._ayahCard = decorateAyah(this, element, elementSettings);\n"
+)
+AYAH_HOOKS = (
+    ("import {UpdateNotification}",
+     AYAH_IMPORT + "\n\nimport {UpdateNotification}"),
+    ("                this._elements.set(elementId, element);",
+     AYAH_ATTACH + "                this._elements.set(elementId, element);"),
+)
+AYAH_FRAME = (
+    ("            this.add_child(element);", "            this.add_child(element._ayahCard?.actor ?? element);"),
+    ("        const {x, y} = this._getPosition();\n        box.set_origin(x, y);",
+     "        const {x, y} = this._elements?.get('verse')?._ayahCard?.position(box) ?? this._getPosition();\n"
+     "        box.set_origin(x, y);"),
+    ("    setStyle() {\n", "    setStyle() {\n"
+     "        if (this._elements.get('verse')?._ayahCard) {\n"
+     "            this.style = '';\n"
+     "            this.queue_relayout();\n"
+     "            return;\n"
+     "        }\n"),
 )
 PANEL_HOOKS = (
     ("import {UpdateNotification}",
@@ -138,6 +168,10 @@ def patch_extension(source):
         source = source.replace(f"{BUNDLE}/{name}", f"{BUNDLE}/bridge/{name}")
     source = source.replace("from './avatar/azclock.js'", f"from './{BUNDLE}/bridge/azclock-avatar.js'")
     source = _apply_hooks(source, MARKER, HOOKS)
+    if LEGACY_AYAH_IMPORT in source:
+        source = _replace_hooks(source, ((LEGACY_AYAH_IMPORT, AYAH_IMPORT), (LEGACY_AYAH_ATTACH, AYAH_ATTACH)))
+    source = _apply_hooks(source, AYAH_IMPORT, AYAH_HOOKS)
+    source = _apply_hooks(source, AYAH_FRAME[0][1], AYAH_FRAME)
     source = _apply_hooks(source, PANEL_MARKER, PANEL_HOOKS)
     if LEGACY_AVATAR_MARKER in source:
         source = _replace_hooks(source, LEGACY_AVATAR_HOOKS)
@@ -146,6 +180,9 @@ def patch_extension(source):
     source = _apply_hooks(source, WIDGET_START_GUARD, ((WIDGET_START, WIDGET_START_GUARD),))
     for hook, count in (
         (f"{MARKER} from './{BUNDLE}/bridge/attachments.js';", 1),
+        (AYAH_IMPORT, 1),
+        (AYAH_ATTACH, 1),
+        *((replacement, 1) for _, replacement in AYAH_FRAME),
         (f"{PANEL_MARKER} from './{BUNDLE}/bridge/indicator.js';", 1),
         (AVATAR_LOAD, 1),
         (AVATAR_CANCEL + AVATAR_STOP, 1),
@@ -183,8 +220,11 @@ def prepare_extension(directory):
 
 def bundle_assets(frames, audio):
     avatar = ROOT / "widgets/avatar"
+    ayah = ROOT / "widgets/ayah"
     paths = {
         **{f"bridge/{name}": ROOT / "bridge" / name for name in BRIDGE_FILES},
+        **{f"widgets/ayah/{name}": ayah / name for name in ("card.js", "themes.json")},
+        **{f"widgets/ayah/art/{art.name}": art for art in (ayah / "art").iterdir()},
         **{f"widgets/avatar/{name}": avatar / name for name in AVATAR_MODULES},
         **{f"widgets/avatar/{name}": frames / name for name in AVATAR_FRAMES},
         "widgets/avatar/avatar-audio": audio,
@@ -248,6 +288,11 @@ def install_bridge():
     for unit in ("desk-light.service", "desk-avatar.service"):
         if (units / unit).is_file():
             subprocess.run(["systemctl", "--user", "disable", "--now", unit], check=True)
+    host = AzClockHost.discover()
+    if host.has_custom_ayah and "ayah" in host.visibility():
+        card = host.card("ayah")
+        if card.theme in AYAH_PRESETS:
+            host.apply_card("ayah", card, {})
     if original != updated:
         if not backup.exists():
             _replace_file(backup, original, entry.stat().st_mode & 0o777)

@@ -21,6 +21,7 @@ Gio._promisify(Gio.File.prototype, 'load_bytes_async');
 
 const ROW_BYTES = walk.width * 4;
 const FRAME_BYTES = ROW_BYTES * walk.height;
+const AUTHORED_DISTANCE = Math.max(...walk.travel);
 const PLAYER_ID = 'io.github.desktopwidgets.Media';
 const PLAYER_PATH = '/io/github/desktopwidgets/Media';
 
@@ -36,7 +37,7 @@ function boundsFor(actor) {
 }
 
 function upload(bytes) {
-    const image = new St.ImageContent();
+    const image = St.ImageContent.new_with_preferred_size(walk.width, walk.height);
     const cogl = global.stage.context.get_backend().get_cogl_context();
     if (!image.set_bytes(cogl, bytes, Cogl.PixelFormat.RGBA_8888, walk.width, walk.height, ROW_BYTES))
         throw new Error('Avatar texture upload failed');
@@ -68,6 +69,7 @@ export class AvatarPilot {
 
     setup() {
         this.actor = new Clutter.Actor({width: walk.width, height: walk.height, visible: false});
+        this.actor.set_pivot_point(0.5, 0.5);
         this.listeningScene = new ListeningScene(this.actor, () => this.refresh());
         const button = new St.Button({accessible_name: 'Desktop avatar', can_focus: true, reactive: true});
         button.set_size(Math.floor(walk.width * 0.55), Math.floor(walk.height * 0.72));
@@ -208,9 +210,11 @@ export class AvatarPilot {
         const {widgets} = this.extension;
         const clockWidget = widgets.get('clock');
         const avatar = widgets.get('avatar');
-        const label = clockWidget?._elements.get('card')?.clutter_text;
+        const source = clockWidget?._elements.get('card');
+        const clockCard = source?._clockCard?.actor ?? source;
+        const label = (source?._clockCard?.label ?? source)?.clutter_text;
         const body = avatar?._elements.get('body');
-        const watched = new Set([clockWidget, avatar, label, body].filter(Boolean));
+        const watched = new Set([clockWidget, clockCard, avatar, label, body].filter(Boolean));
         for (const object of this.watched ?? []) {
             if (!watched.has(object))
                 this.unwatch(object);
@@ -218,7 +222,10 @@ export class AvatarPilot {
         for (const object of watched) {
             if (!this.watched?.has(object)) {
                 if (object === label)
-                    this.watch(object, 'notify::allocation', 'notify::mapped', 'notify::text');
+                    this.watch(object, 'notify::allocation', 'notify::mapped', 'notify::text',
+                        'notify::font-description', 'notify::attributes');
+                else if (object === clockCard)
+                    this.watch(object, 'notify::allocation', 'notify::mapped', 'style-changed');
                 else
                     this.watch(object, 'notify::allocation', 'notify::mapped', 'parent-set');
             }
@@ -234,14 +241,14 @@ export class AvatarPilot {
         }
 
         const bodyBounds = boundsFor(body);
-        const clock = this.clockPlacement(clockWidget, label, bodyBounds?.monitor);
+        const clock = this.clockPlacement(clockWidget, clockCard, label, bodyBounds?.monitor);
         const clockParent = clockWidget?.get_parent();
         const placement = resolveAvatarPlacement({
             visible: avatar?.mapped && body?.mapped && !Main.sessionMode.isLocked && !Main.overview.visible,
             body: bodyBounds,
             clock,
             windows: clock?.track && clockParent !== Main.uiGroup ? this.windowBounds() : [],
-        }, walk);
+        }, walk, listening ?? undefined);
         this.hidden = placement.kind === 'hidden';
         this.placementPending = placement.kind === 'pending';
         if (this.hidden) {
@@ -265,14 +272,16 @@ export class AvatarPilot {
         }
         let card = null;
         if (perched) {
-            const [ok, localX, localY] = parent.transform_stage_point(clock.x, clock.y);
+            const [ok, localX, localY] = parent.transform_stage_point(clock.card.x, clock.card.y);
             if (ok)
-                card = {x: localX, y: localY, width: clock.width, height: clock.height};
+                card = {x: localX, y: localY, width: clock.card.width, height: clock.card.height};
         }
         const previousParent = this.actor.get_parent();
         const moved = parent !== previousParent || x !== this.geometry?.localX ||
-            y !== this.geometry?.localY || placement.kind !== this.geometry?.kind;
-        if (moved || !placement.canWalk || !this.animationSettings.enable_animations) {
+            y !== this.geometry?.localY || placement.kind !== this.geometry?.kind ||
+            placement.mirrored !== this.geometry?.mirrored;
+        if (moved || !placement.canWalk || placement.routeCovered ||
+            placement.walkDistance < (this.geometry?.walkDistance ?? 0) || !this.animationSettings.enable_animations) {
             if (this.walkRequest)
                 this.cancelRequest();
             if (this.timeline)
@@ -285,7 +294,10 @@ export class AvatarPilot {
         if (moved)
             this.actor.set_position(x, y);
         this.geometry = {...placement, card, localX: x, localY: y};
+        if (!this.timeline)
+            this.actor.scale_x = placement.mirrored ? -1 : 1;
         this.actor.z_position = anchor.z_position + 0.5;
+        parent.set_child_above_sibling(this.actor, anchor);
         if (this.rest) {
             this.actor.show();
         } else if (!this.request && !this.failed) {
@@ -300,7 +312,7 @@ export class AvatarPilot {
         this.updateListening();
     }
 
-    clockPlacement(widget, label, bodyMonitor) {
+    clockPlacement(widget, element, label, bodyMonitor) {
         if (!widget?.mapped)
             return null;
         const bounds = boundsFor(widget);
@@ -309,12 +321,16 @@ export class AvatarPilot {
         const clock = {...bounds, dragging: widget._isDragging};
         if (bodyMonitor !== bounds.monitor || !label?.mapped || clock.dragging)
             return clock;
-        if (!label.has_allocation())
+        const card = boundsFor(element);
+        if (!card || !label.has_allocation())
             return {...clock, trackPending: true};
         const [x, y] = label.get_transformed_position();
         const [offsetX, offsetY] = label.get_layout_offsets();
         const track = measureTrack(label.get_layout(), x + offsetX, y + offsetY, walk.pivot[1]);
-        return {...clock, track, rightWall: bounds.x + bounds.width - 2,
+        const theme = element.get_theme_node();
+        return {...clock, card, track, perchSide: element._clockPerchSide,
+            leftWall: card.x + theme.get_border_width(St.Side.LEFT),
+            rightWall: card.x + card.width - theme.get_border_width(St.Side.RIGHT),
             area: Main.layoutManager.monitors[bounds.monitor]
                 ? Main.layoutManager.getWorkAreaForMonitor(bounds.monitor) : null};
     }
@@ -465,14 +481,18 @@ export class AvatarPilot {
     }
 
     play(frames) {
-        const duration = Math.ceil((frames.length - 1) * 1000 / walk.fps);
+        const distanceScale = this.geometry.walkDistance / AUTHORED_DISTANCE;
+        const timeScale = Math.max(1, Math.sqrt(distanceScale));
+        const duration = Math.ceil((frames.length - 1) * 1000 / walk.fps * timeScale);
         const timeline = Clutter.Timeline.new_for_actor(this.actor, duration);
         this.timeline = timeline;
+        const direction = this.geometry.mirrored ? 1 : -1;
+        this.actor.scale_x = direction;
         let current = 0;
         this.timelineSignals = [
             timeline.connect('new-frame', (_timeline, elapsed) => {
-                const {frame, x} = sampleWalk(elapsed, walk);
-                this.actor.translation_x = x;
+                const {frame, x} = sampleWalk(elapsed / timeScale, walk);
+                this.actor.translation_x = direction * x * distanceScale;
                 if (frame !== current) {
                     current = frame;
                     this.actor.content = frames[frame];
@@ -495,6 +515,7 @@ export class AvatarPilot {
             this.timelineSignals = [];
         }
         this.actor.translation_x = 0;
+        this.actor.scale_x = this.geometry?.mirrored ? -1 : 1;
         this.actor.content = this.rest;
     }
 

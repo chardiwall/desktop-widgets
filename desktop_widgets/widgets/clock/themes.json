@@ -1,0 +1,196 @@
+{
+  "Lantern": {
+    "style": "Solid",
+    "text": "#fff0d7",
+    "accent": "#d7b45d",
+    "background": "#211b2e",
+    "font": "DejaVu Serif",
+    "arabic_font": "Amiri",
+    "title": [
+      "Incense at dusk",
+      "بخور المساء"
+    ],
+    "size": 46,
+    "story": "Oud smoke over the terrace",
+    "family_story": "Brass and twilight, from a lit courtyard to the rooftop.",
+    "art": [
+      {"file": "lantern-a-atmosphere.png", "anchor": "bottom-right", "width": 495, "ratio": 2.54094, "opacity": 0.74}
+    ],
+    "wash": "rgba(102,64,147,0.29)"
+  },
+  "Lantern B": {
+    "style": "Solid",
+    "text": "#fff0d7",
+    "accent": "#d7b45d",
+    "background": "#261f31",
+    "font": "DejaVu Serif",
+    "arabic_font": "Amiri",
+    "title": [
+      "The rooftop lamp",
+      "مصباح السطح"
+    ],
+    "size": 46,
+    "story": "Lamplight above the evening clouds",
+    "family_story": "Brass and twilight, from a lit courtyard to the rooftop.",
+    "art": [
+      {"file": "lantern-b-atmosphere.png", "anchor": "bottom-right", "width": 408, "ratio": 2.09407, "opacity": 0.72}
+    ],
+    "wash": "rgba(126,77,139,0.24)"
+  },
+  "Blueprint": {
+    "style": "Glass",
+    "text": "#e5f0ff",
+    "accent": "#88d9fa",
+    "background": "#1c2a34",
+    "font": "DejaVu Sans Mono",
+    "arabic_font": "Amiri",
+    "title": [
+      "The observatory",
+      "المرصد"
+    ],
+    "size": 40,
+    "story": "The first light over the minaret",
+    "family_story": "From the tile-lined observatory to the instruments that read the sky.",
+    "art": [
+      {"file": "blueprint-a-atmosphere.png", "anchor": "bottom-right", "width": 419, "ratio": 2.15126, "opacity": 0.75},
+      {"file": "blueprint-a-motif-edge.png", "anchor": "top-right", "width": 126, "ratio": 1.095, "opacity": 0.66, "inset": [0, 10]}
+    ],
+    "wash": "rgba(47,127,183,0.27)"
+  },
+  "Blueprint B": {
+    "style": "Glass",
+    "text": "#e5f0ff",
+    "accent": "#9ed6f2",
+    "background": "#19283d",
+    "font": "DejaVu Sans Mono",
+    "arabic_font": "Amiri",
+    "title": [
+      "Star bearings",
+      "منازل النجوم"
+    ],
+    "size": 40,
+    "story": "The brass rings of the armillary sphere",
+    "family_story": "From the tile-lined observatory to the instruments that read the sky.",
+    "art": [
+      {"file": "blueprint-b-atmosphere.png", "anchor": "bottom-right", "width": 415, "ratio": 2.1289, "opacity": 0.74},
+      {"file": "blueprint-b-motif-edge.png", "anchor": "top-right", "width": 138, "ratio": 1.1, "opacity": 0.47, "inset": [0, 10]}
+    ],
+    "wash": "rgba(59,102,180,0.30)"
+  },
+  "Oasis": {
+    "style": "Glass",
+    "text": "#edf8e6",
+    "accent": "#9dd8b3",
+    "background": "#263628",
+    "font": "Ubuntu Sans",
+    "arabic_font": "Amiri",
+    "title": [
+      "The fountain",
+      "النافورة"
+    ],
+    "size": 44,
+    "story": "A runnel below the fountain",
+    "family_story": "Water and filtered light from the garden to the olive terraces.",
+    "art": [
+      {"file": "oasis-a-atmosphere.png", "anchor": "bottom-right", "width": 372, "ratio": 1.90689, "opacity": 0.7}
+    ],
+    "wash": "rgba(48,133,104,0.25)"
+  },
+  "Oasis B": {
+    "style": "Glass",
+    "text": "#edf8e6",
+    "accent": "#c2d99a",
+    "background": "#23372f",
+    "font": "Ubuntu Sans",
+    "arabic_font": "Amiri",
+    "title": [
+      "Olive terraces",
+      "مصاطب الزيتون"
+    ],
+    "size": 44,
+    "story": "Mist among the olive terraces",
+    "family_story": "Water and filtered light from the garden to the olive terraces.",
+    "art": [
+      {"file": "oasis-b-atmosphere.png", "anchor": "bottom-right", "width": 403, "ratio": 2.06869, "opacity": 0.73}
+    ],
+    "wash": "rgba(91,126,68,0.25)"
+  },
+  "Warm Earth": {
+    "style": "Solid",
+    "text": "#322119",
+    "accent": "#b25e3d",
+    "background": "#f3e5d6",
+    "font": "Liberation Serif",
+    "arabic_font": "Amiri",
+    "title": [
+      "The wind tower",
+      "برج الرياح"
+    ],
+    "size": 45,
+    "story": "The wind tower above the rooftops",
+    "family_story": "Sandstone and terracotta, from the desert road to the sheltered courtyard.",
+    "art": [
+      {"file": "warm-earth-a-atmosphere.png", "anchor": "bottom-right", "width": 400, "ratio": 2.0521, "opacity": 0.78},
+      {"file": "warm-earth-a-motif-edge.png", "anchor": "top-right", "width": 107, "ratio": 1.105, "opacity": 0.5, "inset": [0, 10]}
+    ],
+    "wash": "rgba(191,113,64,0.24)"
+  },
+  "Warm Earth B": {
+    "style": "Solid",
+    "text": "#322119",
+    "accent": "#9a4f35",
+    "background": "#f0ddc7",
+    "font": "Liberation Serif",
+    "arabic_font": "Amiri",
+    "title": [
+      "Clay and linen",
+      "الطين والكتان"
+    ],
+    "size": 45,
+    "story": "Water jars in the sheltered courtyard",
+    "family_story": "Sandstone and terracotta, from the desert road to the sheltered courtyard.",
+    "art": [
+      {"file": "warm-earth-b-atmosphere.png", "anchor": "bottom-right", "width": 449, "ratio": 2.30112, "opacity": 0.73}
+    ],
+    "wash": "rgba(178,87,54,0.25)"
+  },
+  "Graphite": {
+    "style": "Glass",
+    "text": "#f5f1ed",
+    "accent": "#ad98ce",
+    "background": "#25232b",
+    "font": "Literata",
+    "arabic_font": "Amiri",
+    "title": [
+      "Slate and mist",
+      "الصخر والضباب"
+    ],
+    "size": 48,
+    "story": "Lavender mist through the slate gorge",
+    "family_story": "Silver mist and violet shadows from the uplands to the shore.",
+    "art": [
+      {"file": "graphite-a-atmosphere.png", "anchor": "bottom-right", "width": 458, "ratio": 2.34862, "opacity": 0.72}
+    ],
+    "wash": "rgba(117,104,156,0.24)"
+  },
+  "Graphite B": {
+    "style": "Glass",
+    "text": "#f5f1ed",
+    "accent": "#c2b2da",
+    "background": "#252532",
+    "font": "Literata",
+    "arabic_font": "Amiri",
+    "title": [
+      "Sea fog",
+      "ضباب البحر"
+    ],
+    "size": 48,
+    "story": "Silver sea fog around the coastal cliffs",
+    "family_story": "Silver mist and violet shadows from the uplands to the shore.",
+    "art": [
+      {"file": "graphite-b-atmosphere.png", "anchor": "bottom-right", "width": 416, "ratio": 2.13333, "opacity": 0.69},
+      {"file": "graphite-b-motif-edge.png", "anchor": "top-right", "width": 90, "ratio": 1.06, "opacity": 0.45, "inset": [0, 10]}
+    ],
+    "wash": "rgba(105,97,141,0.25)"
+  }
+}

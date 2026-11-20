@@ -8,6 +8,7 @@ from gi.repository import Gio, GLib
 
 from desktop_widgets.bridge.gnome import AzClockHost, HostError
 from desktop_widgets.settings import CardEditor
+from desktop_widgets.widgets.ayah.themes import PRESETS
 
 SCHEMA = """<schemalist>
   <schema id="org.gnome.shell.extensions.azclock" path="/org/gnome/shell/extensions/azclock/">
@@ -76,6 +77,13 @@ class AzClockTest(unittest.TestCase):
 
         self.host.set_visible("clock", True)
         self.assertEqual(self.host.root.get_value("widgets").unpack(), GLib.Variant("aa{sv}", self.entries).unpack())
+
+    def test_pull_cord_retirement_preserves_other_widget_entries(self):
+        configured = [entry("thread"), *self.entries[:-1], self.entries[-1] | entry("knob")]
+        self.host.root.set_value("widgets", GLib.Variant("aa{sv}", configured))
+        for _ in range(2):
+            self.host.retire_pull_cord()
+            self.assertEqual(self.host.root.get_value("widgets"), GLib.Variant("aa{sv}", self.entries))
 
     def test_unconfigured_widget_is_not_created_by_a_toggle(self):
         self.host.widget("avatar").reset("elements")
@@ -235,6 +243,66 @@ class AzClockTest(unittest.TestCase):
         updated = self.host.apply_card("clock", self.host.card("clock"), {"style": "Minimal"})
         self.assertEqual((updated.style, updated.background), ("Minimal", "#ffffff"))
         self.assertEqual(frame.get_string("background-color"), "white")
+
+    def test_named_theme_round_trips_across_widget_designs_and_faces(self):
+        editor = CardEditor("clock", self.host.card("clock"))
+        editor.edit(face="ar")
+        editor.select_theme("Warm Earth")
+        editor.edit(accent="#c77356")
+        name = self.host.save_custom_theme("Terracotta dusk", "clock", editor.draft)
+        editor.select_custom(name, self.host.custom_themes()[name])
+        clock = self.host.apply_card("clock", editor.saved, editor.changes())
+        self.assertEqual((clock.face, clock.clock_design, clock.custom_name), ("ar", "Warm Earth", name))
+
+        self.host.element("ayah").set_int("font-size", 7)
+        ayah = CardEditor("ayah", self.host.card("ayah"))
+        ayah.select_custom(name, self.host.custom_themes()[name])
+        applied = self.host.apply_card("ayah", ayah.saved, ayah.changes())
+        self.assertEqual((applied.art_theme, applied.accent, applied.custom_name), ("Warm Earth A", "#c77356", name))
+        self.assertEqual(applied.font, PRESETS["Warm Earth A"]["font"])
+
+        editor.mark_saved(clock)
+        editor.select_theme("Blueprint")
+        self.host.apply_card("clock", editor.saved, editor.changes())
+        self.assertEqual(self.host.card("clock").face, "ar")
+        self.assertEqual(self.host.card("clock", custom=True).accent, "#c77356")
+        self.assertEqual(self.host.custom_themes()[name]["accent"], "#c77356")
+        for reserved in ("warm earth", "Terracotta Dusk"):
+            with self.assertRaisesRegex(ValueError, "new theme name"):
+                self.host.save_custom_theme(reserved, "clock", editor.draft)
+
+    def test_default_card_width_matches_with_no_native_width(self):
+        for widget in ("ayah", "clock"):
+            self.host.element(widget).set_string("background-color", "transparent")
+            self.assertEqual(self.host.card(widget).width, 600)
+        clock = self.host.card("clock")
+        self.assertEqual(self.host.apply_card("clock", clock, {"width": 500}).width, 500)
+        self.assertEqual(self.host.card("ayah").width, 600)
+
+    def test_theme_family_applies_both_opacities_and_preserves_the_clock_face(self):
+        clock = self.host.card("clock")
+        self.assertEqual(clock.width, self.host.card("ayah").width)
+        self.assertEqual(clock.width, 600)
+        clock = self.host.apply_card("clock", clock, {"face": "ar"})
+        ayah = self.host.card("ayah")
+        updates = {
+            "clock": (clock, {"theme": "Lantern B", "clock_design": "Lantern B",
+                              "transparency": 61, "text_opacity": 72}),
+            "ayah": (ayah, {"theme": "Lantern B", "art_theme": "Lantern B",
+                            "transparency": 61, "text_opacity": 72}),
+        }
+        self.host.element("ayah").set_string("foreground-color", "#aabbcc")
+        invalid = {**updates, "ayah": (ayah, {**updates["ayah"][1], "text": "#ffffff"})}
+        with self.assertRaises(HostError):
+            self.host.apply_cards(invalid)
+        self.assertEqual(self.host.card("clock"), clock)
+
+        result = self.host.apply_cards(updates)
+        self.assertEqual(result, {widget: self.host.card(widget) for widget in updates})
+        self.assertEqual(result["clock"].face, "ar")
+        self.assertEqual(result["ayah"].art_theme, "Lantern B")
+        for card in result.values():
+            self.assertEqual((card.transparency, card.text_opacity), (61, 72))
 
     def test_system_font_family_with_punctuation_round_trips(self):
         clock = self.host.card("clock")

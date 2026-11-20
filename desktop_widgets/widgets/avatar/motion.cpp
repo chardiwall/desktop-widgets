@@ -5,11 +5,12 @@
 
 gboolean desktop_widgets_motion_place(const double *ranges, gsize range_length,
     double track_right, double track_top, double area_x, double area_y, double area_width,
-    double area_height, double width, double height, double pivot_x, double pivot_y,
-    double distance, double wall, double *x, double *y, gboolean *can_walk, double *seat_shift)
+    double area_height, double width, double height, double seat_contact, double pivot_y,
+    double distance, double wall, double seated_back, double *x, double *y, gboolean *can_walk,
+    double *seat_shift, double *walk_distance)
 {
     constexpr double gap = 6;
-    *x = *seat_shift = 0;
+    *x = *seat_shift = *walk_distance = 0;
     *can_walk = false;
     *y = track_top - pivot_y;
     if (*y < area_y || *y + height > area_y + area_height)
@@ -23,6 +24,7 @@ gboolean desktop_widgets_motion_place(const double *ranges, gsize range_length,
         if (right - left >= width + distance) {
             perch = right;
             *can_walk = true;
+            *walk_distance = right - left - width;
             break;
         }
         if (std::isnan(perch) && right - left >= width)
@@ -31,10 +33,10 @@ gboolean desktop_widgets_motion_place(const double *ranges, gsize range_length,
     if (std::isnan(perch))
         return false;
 
-    *seat_shift = *can_walk ? distance : 0;
-    *x = perch - width - *seat_shift;
-    if (perch == track_right && wall <= area_right && wall - width + pivot_x <= perch)
-        *seat_shift = std::max(*seat_shift, wall - width - *x);
+    *x = perch - width;
+    const double seat_x = wall - seated_back;
+    if (perch == track_right && wall <= area_right && seat_x >= *x && seat_x + seat_contact <= perch)
+        *seat_shift = seat_x - *x;
     return true;
 }
 

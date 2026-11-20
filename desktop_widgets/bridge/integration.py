@@ -10,12 +10,12 @@ from tempfile import NamedTemporaryFile, TemporaryDirectory
 from gi.repository import GLib
 
 from .gnome import AzClockHost, EXTENSION, HostError
-from ..widgets.ayah.themes import PRESETS as AYAH_PRESETS
+from ..settings import theme_art_paths
 
 ROOT = Path(__file__).resolve().parents[1]
 BUNDLE = "desktop-widget-settings/desktop_widgets"
 RELEASES = "desktop-widget-settings/releases"
-BRIDGE_FILES = ("attachments.js", "ayah.js", "indicator.js", "azclock-avatar.js", "listening.js", "track.js")
+BRIDGE_FILES = ("attachments.js", "ayah.js", "clock.js", "indicator.js", "azclock-avatar.js", "listening.js", "track.js")
 AVATAR_MODULES = ("motion.js", "placement.js")
 AVATAR_FRAMES = ("rest.rgba", "walk.rgba", "listening.rgba", "walk-data.js")
 MARKER = "import {displayedWidgets}"
@@ -46,6 +46,20 @@ AYAH_HOOKS = (
     ("                this._elements.set(elementId, element);",
      AYAH_ATTACH + "                this._elements.set(elementId, element);"),
 )
+CLOCK_IMPORT = f"import {{decorateClock}} from './{BUNDLE}/bridge/clock.js';"
+LEGACY_CLOCK_ATTACH = (
+    "                if (this._settingsId === 'clock' && elementId === 'card' && element.clutter_text)\n"
+    "                    decorateClock(element, elementSettings);\n"
+)
+CLOCK_ATTACH = (
+    "                if (this._settingsId === 'clock' && elementId === 'card' && element.clutter_text)\n"
+    "                    element._clockCard = decorateClock(this, element, elementSettings);\n"
+)
+CLOCK_HOOKS = (
+    ("import {UpdateNotification}", CLOCK_IMPORT + "\n\nimport {UpdateNotification}"),
+    ("                this._elements.set(elementId, element);",
+     CLOCK_ATTACH + "                this._elements.set(elementId, element);"),
+)
 AYAH_FRAME = (
     ("            this.add_child(element);", "            this.add_child(element._ayahCard?.actor ?? element);"),
     ("        const {x, y} = this._getPosition();\n        box.set_origin(x, y);",
@@ -57,6 +71,14 @@ AYAH_FRAME = (
      "            this.queue_relayout();\n"
      "            return;\n"
      "        }\n"),
+)
+CARD_FRAME = (
+    (AYAH_FRAME[0][1], "            this.add_child(element._ayahCard?.actor ?? element._clockCard?.actor ?? element);"),
+    (AYAH_FRAME[1][1], "        const card = this._elements?.get('verse')?._ayahCard ?? this._elements?.get('card')?._clockCard;\n"
+     "        const {x, y} = card?.position(box) ?? this._getPosition();\n        box.set_origin(x, y);"),
+    (AYAH_FRAME[2][1], "    setStyle() {\n"
+     "        if (this._elements.get('verse')?._ayahCard || this._elements.get('card')?._clockCard) {\n"
+     "            this.style = '';\n            this.queue_relayout();\n            return;\n        }\n"),
 )
 PANEL_HOOKS = (
     ("import {UpdateNotification}",
@@ -171,7 +193,12 @@ def patch_extension(source):
     if LEGACY_AYAH_IMPORT in source:
         source = _replace_hooks(source, ((LEGACY_AYAH_IMPORT, AYAH_IMPORT), (LEGACY_AYAH_ATTACH, AYAH_ATTACH)))
     source = _apply_hooks(source, AYAH_IMPORT, AYAH_HOOKS)
-    source = _apply_hooks(source, AYAH_FRAME[0][1], AYAH_FRAME)
+    if CARD_FRAME[0][1] not in source:
+        source = _apply_hooks(source, AYAH_FRAME[0][1], AYAH_FRAME)
+        source = _replace_hooks(source, CARD_FRAME)
+    source = _apply_hooks(source, CLOCK_IMPORT, CLOCK_HOOKS)
+    if LEGACY_CLOCK_ATTACH in source:
+        source = _replace_hooks(source, ((LEGACY_CLOCK_ATTACH, CLOCK_ATTACH),))
     source = _apply_hooks(source, PANEL_MARKER, PANEL_HOOKS)
     if LEGACY_AVATAR_MARKER in source:
         source = _replace_hooks(source, LEGACY_AVATAR_HOOKS)
@@ -182,7 +209,9 @@ def patch_extension(source):
         (f"{MARKER} from './{BUNDLE}/bridge/attachments.js';", 1),
         (AYAH_IMPORT, 1),
         (AYAH_ATTACH, 1),
-        *((replacement, 1) for _, replacement in AYAH_FRAME),
+        (CLOCK_IMPORT, 1),
+        (CLOCK_ATTACH, 1),
+        *((replacement, 1) for _, replacement in CARD_FRAME),
         (f"{PANEL_MARKER} from './{BUNDLE}/bridge/indicator.js';", 1),
         (AVATAR_LOAD, 1),
         (AVATAR_CANCEL + AVATAR_STOP, 1),
@@ -221,10 +250,12 @@ def prepare_extension(directory):
 def bundle_assets(frames, audio):
     avatar = ROOT / "widgets/avatar"
     ayah = ROOT / "widgets/ayah"
+    clock = ROOT / "widgets/clock"
     paths = {
         **{f"bridge/{name}": ROOT / "bridge" / name for name in BRIDGE_FILES},
+        **{f"widgets/clock/{name}": clock / name for name in ("face.js", "themes.json")},
         **{f"widgets/ayah/{name}": ayah / name for name in ("card.js", "themes.json")},
-        **{f"widgets/ayah/art/{art.name}": art for art in (ayah / "art").iterdir()},
+        **{path.as_posix(): ROOT / path for path in theme_art_paths()},
         **{f"widgets/avatar/{name}": avatar / name for name in AVATAR_MODULES},
         **{f"widgets/avatar/{name}": frames / name for name in AVATAR_FRAMES},
         "widgets/avatar/avatar-audio": audio,
@@ -284,11 +315,16 @@ def install_bridge():
     updated = prepare_release(directory, updated, assets)
 
     # The legacy watcher resets the card widths and borders on startup.
-    units = Path.home() / ".config/systemd/user"
+    config = Path.home() / ".config"
+    units = config / "systemd/user"
     for unit in ("desk-light.service", "desk-avatar.service"):
         if (units / unit).is_file():
             subprocess.run(["systemctl", "--user", "disable", "--now", unit], check=True)
+    state = config / "desk-light/state"
+    if not state.is_symlink() and state.is_file() and state.read_bytes().strip() == b"on":
+        _replace_file(state, b"off\n", state.stat().st_mode & 0o777)
     host = AzClockHost.discover()
+    host.retire_pull_cord()
     if host.has_custom_ayah and "ayah" in host.visibility():
         card = host.card("ayah")
         if card.theme in AYAH_PRESETS:

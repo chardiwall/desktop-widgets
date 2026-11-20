@@ -3,11 +3,12 @@ import GLib from 'gi://GLib';
 
 const travelData = new WeakMap();
 
-export function placeOnTrack(track, area, asset, rightWall = null) {
+export function placeOnTrack(track, area, asset, rightWall = null, seat = {}) {
     const {width, height, pivot, travel} = asset;
-    const [fits, x, y, canWalk, seatShift] = Motion.place(track.ranges.flat(), track.right, track.top,
-        area.x, area.y, area.width, area.height, width, height, ...pivot, Math.max(...travel), rightWall ?? NaN);
-    return fits ? {x, y, width: width + seatShift, height, canWalk, seatShift} : null;
+    const [fits, x, y, canWalk, seatShift, walkDistance] = Motion.place(track.ranges.flat(), track.right, track.top,
+        area.x, area.y, area.width, area.height, width, height, seat.contact ?? pivot[0], pivot[1],
+        Math.max(...travel), rightWall ?? NaN, seat.back ?? width);
+    return fits ? {x, y, width, height, canWalk, seatShift, walkDistance} : null;
 }
 
 export function sampleWalk(elapsed, asset) {
@@ -22,6 +23,14 @@ export function sampleWalk(elapsed, asset) {
 
 export function listeningFrame(asset, phase, elapsed) {
     return Motion.listening_frame(asset.seated, asset.fps, asset.anchors.length, phase, elapsed);
+}
+
+export function umbrellaBox({head, hand, crown = head[1] - 25}) {
+    const x = Math.min(head[0] - 56, hand[0] - 12);
+    const y = crown - 50;
+    const right = Math.max(head[0] + 56, hand[0] + 4);
+    return {x, y, width: Math.ceil(right - x), height: Math.ceil(hand[1] - y + 10),
+        canopyX: head[0] - x, gripX: hand[0] - x, gripY: hand[1] - y};
 }
 
 export function overlaps(a, b) {

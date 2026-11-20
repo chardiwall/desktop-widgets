@@ -15,11 +15,17 @@ const clock = {
 };
 const view = {visible: true, body, clock};
 const clear = resolveAvatarPlacement(view, avatar);
-check(clear.kind === 'perched' && clear.x === 640 && clear.y === 315 && clear.canWalk,
+check(clear.kind === 'perched' && clear.x === 674 && clear.y === 315 && clear.walkDistance === 384 && clear.canWalk,
     'The Avatar perches on the Clock when they share a display');
-const covered = resolveAvatarPlacement({...view, windows: [{x: 735, y: 350, width: 400, height: 200}]}, avatar);
+const covered = resolveAvatarPlacement({...view, windows: [{x: 300, y: 350, width: 40, height: 200}]}, avatar);
 check(covered.kind === 'perched' && covered.x === clear.x && covered.routeCovered,
     'A partly obstructed route keeps the perch and blocks a new walk');
+const leftClock = {...clock, perchSide: 'left', leftWall: 255, track: {...clock.track, left: 290}};
+const left = resolveAvatarPlacement({...view, clock: leftClock, windows: [{x: 625, y: 350, width: 40, height: 200}]},
+    avatar, {back: 115, contact: 10});
+check(left.kind === 'perched' && left.mirrored && left.x === 290 && left.y === clear.y &&
+    left.walkDistance === clear.walkDistance && left.routeCovered && left.seatShift === -16,
+    'The Arabic layout mirrors the perch, wall lean, and window checks');
 check(resolveAvatarPlacement({...view, clock: {...clock, trackPending: true}}, avatar).kind === 'pending',
     'Wait for the Clock to finish relayout before replacing the current placement');
 check(resolveAvatarPlacement({...view, clock: {pending: true}}, avatar).kind === 'pending',

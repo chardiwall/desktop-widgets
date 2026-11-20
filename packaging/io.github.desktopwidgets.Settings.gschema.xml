@@ -12,6 +12,52 @@
       <default>(-1, -1, -1)</default>
       <summary>Text size, width and background transparency inherited by the Ayah presets</summary>
     </key>
+    <key name="ayah-preset-text-opacity" type="i">
+      <range min="0" max="100"/>
+      <default>100</default>
+      <summary>Text opacity for the predefined Ayah designs</summary>
+    </key>
+    <key name="clock-text-opacity" type="i">
+      <range min="0" max="100"/>
+      <default>100</default>
+      <summary>Text opacity on the clock</summary>
+    </key>
+    <key name="clock-card-width" type="i">
+      <default>-1</default>
+      <summary>Explicit clock card width in pixels</summary>
+    </key>
+    <key name="clock-face" type="s">
+      <default>'en'</default>
+      <summary>Language of the clock face</summary>
+    </key>
+    <key name="clock-theme" type="s">
+      <default>'Custom'</default>
+      <summary>Selected clock theme</summary>
+    </key>
+    <key name="clock-design" type="s">
+      <default>'Lantern'</default>
+      <summary>Clock dial design used by the current theme</summary>
+    </key>
+    <key name="clock-arabic-font" type="s">
+      <default>''</default>
+      <summary>Arabic font family on the clock face</summary>
+    </key>
+    <key name="clock-custom" type="a{sv}">
+      <default>{}</default>
+      <summary>Independent custom clock appearance</summary>
+    </key>
+    <key name="clock-custom-name" type="s">
+      <default>''</default>
+      <summary>Name of the active saved custom clock theme</summary>
+    </key>
+    <key name="ayah-custom-name" type="s">
+      <default>''</default>
+      <summary>Name of the active saved custom Ayah theme</summary>
+    </key>
+    <key name="custom-themes" type="a{ss}">
+      <default>{}</default>
+      <summary>Named custom themes shared by the Ayah reminder and clock</summary>
+    </key>
     <key name="shell-session" type="s">
       <default>''</default>
       <summary>GNOME Shell session that owns temporary visibility state</summary>

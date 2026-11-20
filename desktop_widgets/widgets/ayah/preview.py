@@ -24,7 +24,7 @@ def _label(index):
     return label
 
 
-def _panel(overlay, card, theme, width, height, miniature=False):
+def paint_panel(overlay, card, theme, width, height, miniature=False, *, art_dir=ART, mirror=False):
     opacity = 1 if miniature else card.opacity
     radius = 8 if miniature else theme["radius"]
     border = theme["border"]
@@ -34,12 +34,16 @@ def _panel(overlay, card, theme, width, height, miniature=False):
     overlay.frame_css.load_from_string(
         f"box {{ border: {border}px solid {card.accent}; border-radius: {radius}px; }}"
     )
-    overlay.art.set_opacity(opacity)
-    overlay.frame.set_opacity(opacity)
-    art_key = (card.art_theme, width, height)
+    overlay.art.set_opacity(opacity ** 0.5)
+    overlay.frame.set_opacity(opacity * theme.get("frame_opacity", 1))
+    wash = theme.get("wash")
+    art_key = (theme.get("art"), wash, radius, art_dir, width, height, mirror)
     if art_key == overlay.art_key:
         return
     overlay.art_key = art_key
+    transform = "transform: scaleX(-1);" if mirror else ""
+    gradient = f"background-image: linear-gradient(to bottom, transparent, {wash});" if wash else ""
+    overlay.art_css.load_from_string(f"overlay {{ {transform} {gradient} border-radius: {radius}px; }}")
     for layer in overlay.layers:
         overlay.art.remove_overlay(layer)
     overlay.layers.clear()
@@ -55,7 +59,7 @@ def _panel(overlay, card, theme, width, height, miniature=False):
         picture.set_margin_top(y if vertical == "top" else 0)
         picture.set_margin_bottom(y if vertical == "bottom" else 0)
         _css(picture).load_from_string(
-            f'box {{ background-image: url("{(ART / art["file"]).as_uri()}"); '
+            f'box {{ background-image: url("{(art_dir / art["file"]).as_uri()}"); '
             f'background-size: {layer_width}px auto; background-repeat: no-repeat; '
             f'background-position: {horizontal} {vertical}; }}'
         )
@@ -79,6 +83,7 @@ def _panel_widget():
     overlay.fill_css = _css(fill)
     overlay.art = Gtk.Overlay(can_target=False)
     overlay.add_overlay(overlay.art)
+    overlay.art_css = _css(overlay.art)
     overlay.frame = Gtk.Box(can_target=False)
     overlay.add_overlay(overlay.frame)
     overlay.frame_css = _css(overlay.frame)
@@ -91,15 +96,17 @@ def thumbnail(card, *, overlay=None):
     if overlay is None:
         overlay = _panel_widget()
         overlay.set_size_request(100, 60)
-    _panel(overlay, card, _preset(card), 132, 60, miniature=True)
+    paint_panel(overlay, card, _preset(card), 132, 60, miniature=True)
     return overlay
 
 
 class AyahPreview:
-    def __init__(self, settings):
+    def __init__(self, settings=None, *, width=0):
+        self.preview_width = width
         self.settings = settings
         self.card = None
-        self.verse = ("", "Loading today’s ayah…", "")
+        self.verse = (("", "Loading today’s ayah…", "") if settings else
+                      ("فَإِنَّ مَعَ الْعُسْرِ يُسْرًا", "So, surely with hardship comes ease.", "Ash-Sharh 94:5"))
         self.command = None
         self.poll = 0
         self.widget = Gtk.ScrolledWindow(
@@ -109,8 +116,9 @@ class AyahPreview:
         self.panel = _panel_widget()
         self.panel.set_halign(Gtk.Align.CENTER)
         self.widget.set_child(self.panel)
-        self.widget.connect("map", self._mapped)
-        self.widget.connect("unmap", self._unmapped)
+        if settings:
+            self.widget.connect("map", self._mapped)
+            self.widget.connect("unmap", self._unmapped)
 
         self.content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=SIZING["gap"])
         self.scroll = Gtk.ScrolledWindow(
@@ -212,6 +220,13 @@ class AyahPreview:
                     geometry = monitor.get_geometry()
                     width = max(1, min(width, geometry.width - 2 * SIZING["margin"]))
                     viewport_height = max(1, geometry.height - 2 * SIZING["margin"])
+        scale = 1
+        if self.preview_width:
+            width = self.preview_width
+            scale = width / SIZING["width"]
+            viewport_height = round(SIZING["height"] * scale)
+            theme = {**theme, "padding": [round(amount * scale) for amount in theme["padding"]]}
+            self.content.set_spacing(round(SIZING["gap"] * scale))
         top, right, bottom, left = theme["padding"]
         self.content.set_margin_top(top)
         arabic_inset = theme["border"] + SIZING["arabic_padding"]
@@ -221,10 +236,10 @@ class AyahPreview:
 
         shadow_rgb = "0,0,0" if int(card.text[1:3], 16) >= 128 else "255,246,224"
         shadow = f"rgba({shadow_rgb},{max(0.3, min(0.8, 1 - card.opacity))})"
-        markup, content_height = fit_verse(self.verse, width, theme, card.arabic_size, card.size,
+        markup, content_height = fit_verse(self.verse, width, theme, card.arabic_size * scale, card.size * scale,
                                            lambda index: self.labels[index].create_pango_layout(None), viewport_height)
         height = min(content_height, viewport_height)
-        _panel(self.panel, card, theme, width, height)
+        paint_panel(self.panel, card, theme, width, height)
         self.panel.set_size_request(width, ceil(height))
         show_footer = any(markup[1:])
         self.footer.set_visible(show_footer)

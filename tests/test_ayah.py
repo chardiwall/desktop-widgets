@@ -1,3 +1,4 @@
+from pathlib import Path
 import unittest
 
 import gi
@@ -7,6 +8,7 @@ from gi.repository import Pango, PangoCairo
 
 from desktop_widgets.widgets.ayah.card import _spacing_correction, fit_verse, verse_from_markup, verse_markup
 from desktop_widgets.widgets.ayah.themes import ART, PRESETS, SIZING, SPEC
+from desktop_widgets.widgets.clock import themes as clock_themes
 
 
 SHORT = ("إِنَّ مَعَ ٱلْعُسْرِ يُسْرًا", "Indeed, with hardship [will be] ease.", "Ash-Sharh 94:6")
@@ -21,12 +23,36 @@ class AyahLayoutTest(unittest.TestCase):
                   '‎<span foreground="#aa6622">━━</span>\n \nAn &amp;\nEnglish line.\n \nSurah 1:1')
         self.assertEqual(verse_from_markup(markup), ("عَرَبِيّ نَصّ", "An & English line.", "Surah 1:1"))
 
-    def test_presets_load_all_nine_distinct_compositions(self):
-        self.assertEqual(len(PRESETS), 9)
-        self.assertNotIn("Blueprint B", PRESETS)
+    def test_presets_load_all_ten_distinct_compositions(self):
+        self.assertEqual(len(PRESETS), 10)
+        self.assertIn("Blueprint B", PRESETS)
         for theme in PRESETS.values():
             for layer in theme["art"]:
                 self.assertTrue((ART / layer["file"]).is_file(), layer)
+
+    def test_clock_art_stays_at_the_edges_and_uses_its_own_files(self):
+        directory = Path(clock_themes.__file__).with_name("art")
+        self.assertEqual(len(clock_themes.DESIGNS), len(PRESETS))
+        for name, theme in clock_themes.DESIGNS.items():
+            with self.subTest(theme=name):
+                scene, *ornaments = theme["art"]
+                self.assertEqual(scene["anchor"], "bottom-right")
+                scene_height = scene["width"] / scene["ratio"]
+                self.assertGreaterEqual(scene_height, SIZING["height"] * 0.65)
+                self.assertLessEqual(scene_height, SIZING["height"])
+                for ornament in ornaments:
+                    self.assertEqual(ornament["anchor"], "top-right")
+                    self.assertLessEqual(ornament["width"], SIZING["default_width"] / 4)
+                for layer in theme["art"]:
+                    self.assertEqual(layer.get("inset", (0, 0))[0], 0)
+                    self.assertLess(layer["opacity"], 0.8)
+                    self.assertTrue((directory / layer["file"]).is_file())
+                    self.assertFalse((ART / layer["file"]).exists())
+
+    def test_blueprint_skyline_can_rise_behind_the_progress_rail(self):
+        skyline, arch = clock_themes.DESIGNS["Blueprint"]["art"]
+        self.assertGreater(skyline["width"] / skyline["ratio"], 150)
+        self.assertEqual(arch["anchor"], "top-right")
 
     def test_verse_number_marks_the_start_of_each_following_ayah(self):
         theme = PRESETS["Oasis A"]
@@ -51,7 +77,7 @@ class AyahLayoutTest(unittest.TestCase):
         theme = PRESETS["Oasis A"]
         PangoCairo.context_set_resolution(context, 96)
         short, short_height = fit_verse(SHORT, SIZING["width"], theme, 24, 12, create_layout, 900)
-        self.assertLess(short_height, SIZING["height"])
+        self.assertEqual(short_height, SIZING["height"])
         self.assertIn(f'size="{24 * Pango.SCALE}"', short[0])
         self.assertIn(f'size="{12 * Pango.SCALE}"', short[1])
         _, medium_height = fit_verse(MEDIUM, SIZING["width"], theme, 24, 12, create_layout, 900)

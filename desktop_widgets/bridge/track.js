@@ -17,7 +17,7 @@ export function measureTrack(layout, originX, originY, pivotY) {
         const top = originY + rect.y / PANGO_SCALE;
         const right = left + rect.width / PANGO_SCALE;
         const bottom = top + rect.height / PANGO_SCALE;
-        if (/^━{8,}$/.test(text.trim())) {
+        if (/^━{8,}$/.test(text.replaceAll('\u200e', '').trim())) {
             if (track)
                 return null;
             track = {left, right, top};

@@ -2,7 +2,7 @@ import Clutter from 'gi://Clutter';
 import GLib from 'gi://GLib';
 import St from 'gi://St';
 
-import {listeningFrame} from '../widgets/avatar/motion.js';
+import {listeningFrame, umbrellaBox} from '../widgets/avatar/motion.js';
 import {listening} from '../widgets/avatar/walk-data.js';
 
 const NOTES = ['♪', '♫', '♪'];
@@ -34,7 +34,9 @@ function headphones(context) {
     }
 }
 
-function umbrella(context) {
+function umbrella(context, {canopyX, gripX, gripY}) {
+    context.save();
+    context.translate(canopyX - 56, 0);
     context.setSourceRGBA(0.21, 0.36, 0.40, 0.98);
     context.moveTo(3, 42);
     context.curveTo(21, -4, 91, -4, 109, 42);
@@ -45,9 +47,12 @@ function umbrella(context) {
     context.setSourceRGBA(0.72, 0.85, 0.85, 1);
     context.setLineWidth(2);
     context.stroke();
-    context.moveTo(56, 38);
-    context.lineTo(56, 100);
-    context.curveTo(56, 108, 46, 108, 46, 102);
+    context.restore();
+    context.setSourceRGBA(0.72, 0.85, 0.85, 1);
+    context.setLineWidth(2);
+    context.moveTo(canopyX, 38);
+    context.lineTo(gripX, gripY);
+    context.curveTo(gripX, gripY + 8, gripX - 9, gripY + 8, gripX - 9, gripY + 2);
     context.stroke();
 }
 
@@ -69,8 +74,13 @@ export class ListeningScene {
 
     buildProps() {
         this.headphones = illustration(70, 44, headphones);
-        this.umbrella = illustration(112, 110, umbrella);
-        this.umbrella.set_pivot_point(0.5, 0.96);
+        const headsetScale = listening.headsetScale ?? 1;
+        this.headphones.set_pivot_point(0.5, 0.75);
+        this.headphones.set_scale(headsetScale, headsetScale);
+        this.umbrella = illustration(112, 110, context => {
+            if (this.umbrellaGeometry)
+                umbrella(context, this.umbrellaGeometry);
+        });
         this.notes = NOTES.map(text => new St.Label({
             text, visible: false, style: 'font-size: 16px; color: #e7ce9e;',
         }));
@@ -104,6 +114,7 @@ export class ListeningScene {
             this.rainLayer.set_position(card.x, card.y);
             this.rainLayer.set_size(card.width, card.height);
             this.rainLayer.z_position = this.actor.z_position - 0.25;
+            parent.set_child_below_sibling(this.rainLayer, this.actor);
         }
         this.rainLayer.visible = Boolean((rain || this.canopy > 0) && card);
         if (!animated) {
@@ -150,7 +161,8 @@ export class ListeningScene {
 
     paint(time) {
         const frame = listeningFrame(listening, this.phase, this.loop);
-        const {head, hand, ground} = listening.anchors[frame];
+        const anchor = listening.anchors[frame];
+        const {head, ground} = anchor;
         const progress = this.phase ** 2 * (3 - 2 * this.phase);
         this.actor.translation_x = this.view.seatShift * progress;
         this.actor.translation_y = -ground;
@@ -159,8 +171,13 @@ export class ListeningScene {
         this.headphones.set_position(head[0] - 35, head[1] - 33);
         this.headphones.opacity = Math.round(this.headset * 255);
         this.headphones.visible = this.headset > 0;
-        this.umbrella.set_position(hand[0] - 56, hand[1] - 101);
-        this.umbrella.set_scale(0.15 + this.canopy * 0.85, 0.15 + this.canopy * 0.85);
+        if (this.canopy > 0 && this.umbrellaAnchor !== anchor) {
+            this.umbrellaAnchor = anchor;
+            const geometry = this.umbrellaGeometry = umbrellaBox(anchor);
+            this.umbrella.set_position(geometry.x, geometry.y);
+            this.umbrella.set_size(geometry.width, geometry.height);
+            this.umbrella.queue_repaint();
+        }
         this.umbrella.opacity = Math.round(this.canopy * 255);
         this.umbrella.visible = this.canopy > 0;
         this.rainLayer.opacity = Math.round(this.canopy * 255);

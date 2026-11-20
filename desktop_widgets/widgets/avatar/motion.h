@@ -16,20 +16,23 @@ G_BEGIN_DECLS
  * @area_height: height of the work area
  * @width: sprite width
  * @height: sprite height
- * @pivot_x: horizontal pivot within the sprite
+ * @seat_contact: leftmost contact with the floor in the seated pose
  * @pivot_y: vertical pivot within the sprite
- * @distance: maximum walk displacement
+ * @distance: minimum clear distance for the authored walk
  * @wall: optional right wall, or NaN for no wall
+ * @seated_back: rightmost extent of the seated sprite from its left edge
  * @x: (out): sprite left edge
  * @y: (out): sprite top edge
  * @can_walk: (out): whether a full walk fits
  * @seat_shift: (out): horizontal displacement available for sitting
+ * @walk_distance: (out): clear displacement to the left of the perch
  * Returns: whether the sprite fits on the track
  */
 gboolean desktop_widgets_motion_place(const double *ranges, gsize range_length,
     double track_right, double track_top, double area_x, double area_y, double area_width,
-    double area_height, double width, double height, double pivot_x, double pivot_y,
-    double distance, double wall, double *x, double *y, gboolean *can_walk, double *seat_shift);
+    double area_height, double width, double height, double seat_contact, double pivot_y,
+    double distance, double wall, double seated_back, double *x, double *y, gboolean *can_walk,
+    double *seat_shift, double *walk_distance);
 
 /**
  * desktop_widgets_motion_sample:

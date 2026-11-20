@@ -53,7 +53,9 @@ def pack_walk(source, destination, listening=None):
         leisure = json.loads((listening / "listening.json").read_text())
         listening_paths = sorted(listening.glob("*.png"))
         anchors = leisure["anchors"]
+        headset_scale = leisure.get("headsetScale", 1)
         if not (1 <= leisure["fps"] <= 60 and 0 < leisure["seated"] < len(anchors) <= 120 and
+                isinstance(headset_scale, (int, float)) and 0 < headset_scale <= 2 and
                 [p.name for p in listening_paths] == [f"{i:04}.png" for i in range(1, len(anchors) + 1)] and
                 all(len(anchor[name]) == 2 and all(math.isfinite(v) for v in anchor[name])
                     for anchor in anchors for name in ("head", "hand"))):
@@ -79,8 +81,14 @@ def pack_walk(source, destination, listening=None):
             raise ValueError("The walk must end in its original standing pose")
 
     if leisure:
+        seated = leisure["seated"]
+        leisure["back"] = max(frame_box[2] for frame_box in listening_bounds[seated:]) - x0
+        floor = listening_bounds[seated][3]
+        with Image.open(listening_paths[seated]) as frame:
+            leisure["contact"] = frame.getchannel("A").crop((x0, floor - 3, x1, floor)).getbbox()[0]
         for anchor, frame_box in zip(leisure["anchors"], listening_bounds):
             anchor["ground"] = frame_box[3] - bounds[0][3]
+            anchor["crown"] = frame_box[1] - y0
             for name in ("head", "hand"):
                 anchor[name][0] -= x0
                 anchor[name][1] -= y0

@@ -31,6 +31,29 @@ function place(actor, x, y, width, height) {
     actor.set_size(width, height);
 }
 
+export function paintCardArt(art, directory, theme, width, height) {
+    const {art: layers, wash, radius} = theme;
+    const key = JSON.stringify([layers, wash, radius, width, height]);
+    if (key === art._paintKey)
+        return;
+    art._paintKey = key;
+    art.destroy_all_children();
+    art.style = wash ? `background-gradient-direction: vertical; background-gradient-start: transparent; ` +
+        `background-gradient-end: ${wash}; border-radius: ${radius}px;` : '';
+    const cornerScale = Math.min(1, width / SIZING.width);
+    for (const layer of layers ?? []) {
+        const [vertical, horizontal] = layer.anchor.split('-');
+        const scale = layer.scenery ? Math.min(height / SIZING.height, SIZING.scenery_scale_max) : cornerScale;
+        const w = Math.round(layer.width * scale);
+        const h = Math.round(w / layer.ratio);
+        const [x, y] = (layer.inset ?? [0, 0]).map(offset => Math.round(offset * cornerScale));
+        const item = new St.Widget({opacity: Math.round(layer.opacity * 255),
+            style: `background-image: url("${directory}${layer.file}"); background-size: contain;`});
+        place(item, horizontal === 'left' ? x : width - w - x, vertical === 'top' ? y : height - h - y, w, h);
+        art.add_child(item);
+    }
+}
+
 function palette(frame, settings, appearance) {
     const theme = SPEC.themes[appearance?.get_string('ayah-theme')];
     const background = frame.get_string('background-color').split(';', 1)[0];
@@ -42,7 +65,9 @@ function palette(frame, settings, appearance) {
             appearance.get_value('ayah-preset-options').deepUnpack() : [-1, -1, -1];
         const opacity = presetTransparency < 0 ? nativeOpacity : (100 - presetTransparency) / 100;
         const rgb = theme.background.slice(1).match(/../gu).map(value => parseInt(value, 16));
-        return {...theme, size, width, opacity, textOpacity: 1, fill: `rgba(${rgb.join(',')},${opacity})`};
+        const textOpacity = settingsSchema.has_key('ayah-preset-text-opacity') ?
+            appearance.get_int('ayah-preset-text-opacity') / 100 : 1;
+        return {...theme, size, width, opacity, textOpacity, fill: `rgba(${rgb.join(',')},${opacity})`};
     }
 
     const custom = settingsSchema?.has_key('ayah-custom') ?
@@ -59,6 +84,32 @@ function palette(frame, settings, appearance) {
         fill: nativeOpacity ? background : 'transparent',
         text: settings.get_string('foreground-color').split(';', 1)[0],
         accent: settings.get_string('border-color').split(';', 1)[0]};
+}
+
+export function cardWorkArea(frame) {
+    const location = JSON.parse(frame._settings.get_string('location-data'));
+    const monitor = Main.layoutManager.monitors[location.monitorIndex] ?? Main.layoutManager.primaryMonitor;
+    if (!monitor)
+        return null;
+    return {location, monitor, area: Main.layoutManager.getWorkAreaForMonitor(monitor.index)};
+}
+
+export function cardPosition(frame, box) {
+    const placement = cardWorkArea(frame);
+    if (!placement)
+        return {x: 0, y: 0};
+    const {location, monitor, area} = placement;
+    const anchor = frame._settings.get_string('anchor-point');
+    const width = box.get_width();
+    const height = box.get_height();
+    const offsetX = anchor.includes('Right') ? width : anchor.includes('Left') ? 0 : width / 2;
+    const offsetY = anchor.includes('Bottom') ? height : anchor.includes('Top') ? 0 : height / 2;
+    const clamp = (position, start, extent, size) =>
+        Math.max(start + SIZING.margin, Math.min(position, start + extent - size - SIZING.margin));
+    return {
+        x: clamp(monitor.x + location.relativeX * monitor.width - offsetX, area.x, area.width, width),
+        y: clamp(monitor.y + location.relativeY * monitor.height - offsetY, area.y, area.height, height),
+    };
 }
 
 class AyahCard {
@@ -128,7 +179,7 @@ class AyahCard {
         source.connectObject('notify::visible', queue, this.actor);
         settings.connectObject('changed', queue, this.actor);
         frame._settings.connectObject('changed', queue, this.actor);
-        for (const key of ['ayah-theme', 'ayah-custom', 'ayah-preset-options']) {
+        for (const key of ['ayah-theme', 'ayah-custom', 'ayah-preset-options', 'ayah-preset-text-opacity']) {
             if (schema?.has_key(key))
                 this.appearance.connectObject(`changed::${key}`, queue, this.actor);
         }
@@ -149,38 +200,16 @@ class AyahCard {
         queue();
     }
 
-    workArea() {
-        const location = JSON.parse(this.frame._settings.get_string('location-data'));
-        const monitor = Main.layoutManager.monitors[location.monitorIndex] ?? Main.layoutManager.primaryMonitor;
-        if (!monitor)
-            return null;
-        return {location, monitor, area: Main.layoutManager.getWorkAreaForMonitor(monitor.index)};
-    }
-
     position(box) {
-        const placement = this.workArea();
-        if (!placement)
-            return {x: 0, y: 0};
-        const {location, monitor, area} = placement;
-        const anchor = this.frame._settings.get_string('anchor-point');
-        const width = box.get_width();
-        const height = box.get_height();
-        const offsetX = anchor.includes('Right') ? width : anchor.includes('Left') ? 0 : width / 2;
-        const offsetY = anchor.includes('Bottom') ? height : anchor.includes('Top') ? 0 : height / 2;
-        const clamp = (position, start, extent, size) =>
-            Math.max(start + SIZING.margin, Math.min(position, start + extent - size - SIZING.margin));
-        return {
-            x: clamp(monitor.x + location.relativeX * monitor.width - offsetX, area.x, area.width, width),
-            y: clamp(monitor.y + location.relativeY * monitor.height - offsetY, area.y, area.height, height),
-        };
+        return cardPosition(this.frame, box);
     }
 
     refresh() {
         this.actor.visible = this.source.visible;
-        const {width: workWidth, height: workHeight} = this.workArea()?.area ?? global.stage;
+        const {width: workWidth, height: workHeight} = cardWorkArea(this.frame)?.area ?? global.stage;
         const theme = this.theme = palette(this.frame._settings, this.settings, this.appearance);
         const savedWidth = theme.width > 0 ? theme.width :
-            Number(this.settings.get_string('background-color').match(WIDTH)?.[1] ?? SIZING.width);
+            Number(this.settings.get_string('background-color').match(WIDTH)?.[1] ?? SIZING.default_width);
         const width = Math.max(1, Math.min(Math.max(SIZING.min_width, savedWidth), SIZING.max_width, workWidth - 2 * SIZING.margin));
         const verse = verseFromText(this.source.clutter_text.text);
         if (this.verse?.some((text, i) => text !== verse[i]))
@@ -215,27 +244,11 @@ class AyahCard {
         place(this.fill, 0, 0, width, height);
         place(this.art, 0, 0, width, height);
         place(this.border, 0, 0, width, height);
-        this.art.opacity = Math.round(theme.opacity * 255);
+        this.art.opacity = Math.round(Math.sqrt(theme.opacity) * 255);
         this.border.opacity = Math.round(theme.opacity * 255);
         this.fill.style = `background-color: ${theme.fill}; border-radius: ${theme.radius}px;`;
         this.border.style = `border: ${theme.border}px solid ${accentStyle}; border-radius: ${theme.radius}px;`;
-        const artKey = JSON.stringify([theme.art, width, height]);
-        if (this.artKey !== artKey) {
-            this.artKey = artKey;
-            this.art.destroy_all_children();
-            for (const art of theme.art ?? []) {
-                const [vertical, horizontal] = art.anchor.split('-');
-                const cornerScale = Math.min(1, width / SIZING.width);
-                const scale = art.scenery ? Math.min(height / SIZING.height, SIZING.scenery_scale_max) : cornerScale;
-                const w = Math.round(art.width * scale);
-                const h = Math.round(w / art.ratio);
-                const [x, y] = (art.inset ?? [0, 0]).map(offset => Math.round(offset * cornerScale));
-                const layer = new St.Widget({opacity: Math.round(art.opacity * 255),
-                    style: `background-image: url("${ART}${art.file}"); background-size: contain;`});
-                place(layer, horizontal === 'left' ? x : width - w - x, vertical === 'top' ? y : height - h - y, w, h);
-                this.art.add_child(layer);
-            }
-        }
+        paintCardArt(this.art, ART, theme, width, height);
 
         let y = top;
         let footerTop;

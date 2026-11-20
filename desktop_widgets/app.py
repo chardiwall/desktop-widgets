@@ -1,8 +1,7 @@
 """Native settings for the three desktop widgets."""
 
 import argparse
-from datetime import datetime
-from html import escape
+from dataclasses import replace
 import subprocess
 
 import gi
@@ -16,13 +15,19 @@ from gi.repository import Adw, Gdk, Gio, GLib, Gtk, PangoCairo
 from .bridge.gnome import ANCHORS, AzClockHost, HostError
 from .bridge.integration import install_bridge
 from .bridge.session import APP_ID, Session
-from .settings import CARD_STYLES, CardEditor, STYLES, THEMES, WIDGETS, theme_preview
-from .widgets.ayah.preview import AyahPreview, thumbnail
+from .settings import (
+    CLOCK_FACES, STYLES, THEMES, THEME_FAMILIES, WIDGETS,
+    Card, CardEditor, custom_preview, fit_card_dimensions, theme_preview,
+)
+from .widgets.ayah.preview import AyahPreview
+from .widgets.ayah.themes import PRESETS as AYAH_PRESETS
 from .widgets.ayah.themes import SIZING as AYAH_SIZING
 from .widgets.ayah.themes import SPEC as AYAH_SPEC
 
+from .widgets.clock.preview import ClockPreview
+from .widgets.clock.themes import DESIGNS
+
 EXTENSIONS_URL = "https://extensions.gnome.org/extension/5156/desktop-clock/"
-AYAH_COLUMNS = ("Lantern", "Blueprint", "Oasis", "Warm Earth", "Graphite")
 SETTINGS_MIN_WIDTH = 890
 
 
@@ -63,79 +68,77 @@ def _percentage():
     return scale
 
 
+def _toggle_group(parent, labels, changed):
+    row = Gtk.Box(halign=Gtk.Align.CENTER)
+    row.add_css_class("linked")
+    buttons = {}
+    for key, label in labels.items():
+        button = Gtk.ToggleButton(label=label)
+        if buttons:
+            button.set_group(next(iter(buttons.values())))
+        button.connect("toggled", lambda item: changed() if item.get_active() else None)
+        row.append(button)
+        buttons[key] = button
+    parent.append(row)
+    return buttons
+
+
 class CardPage:
     def __init__(self, page, name, window):
         self.host = window.host
+        self.window = window
         self.notify = window.notify
         self.name = name
-        custom = self.host.card(name, custom=True) if name == "ayah" else None
+        custom = self.host.card(name, custom=True)
         preset_options = self.host.ayah_preset_options() if name == "ayah" else None
         self.editor = CardEditor(name, self.host.card(name), custom, preset_options)
         self.refreshing = False
 
-        gallery = Adw.PreferencesGroup(title="Themes")
-        page.add(gallery)
-        self.apply_button, self.cancel_button = _actions(gallery, self.apply, self.cancel)
-        grid = Gtk.Grid(column_spacing=8, row_spacing=8, column_homogeneous=True)
-        self.tiles = {}
-        previous = None
-        if name == "ayah":
-            ordered = [f"{family} {variant}" for variant in ("A", "B") for family in AYAH_COLUMNS
-                       if f"{family} {variant}" in THEMES[name]]
-            choices = [(theme, index % 5, index // 5) for index, theme in enumerate((*ordered, "Custom"))]
-        else:
-            choices = [(theme, index % 3, index // 3) for index, theme in enumerate((*THEMES[name], "Custom"))]
-        for theme, column, row in choices:
-            tile = Gtk.ToggleButton(hexpand=True)
-            tile.update_property([Gtk.AccessibleProperty.LABEL], [theme])
-            if previous is not None:
-                tile.set_group(previous)
-            previous = tile
-            content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
-            if name == "ayah":
-                tile_card = self.editor.custom if theme == "Custom" else theme_preview(name, theme, self.editor.draft)
-                miniature = thumbnail(tile_card)
-                css = None
-            else:
-                miniature = Gtk.Label(wrap=True, justify=Gtk.Justification.CENTER)
-                miniature.set_size_request(-1, 68)
-                css = Gtk.CssProvider()
-                miniature.get_style_context().add_provider(css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
-            title = Gtk.Label(label=theme)
-            title.add_css_class("caption")
-            content.append(miniature)
-            content.append(title)
-            tile.set_child(content)
-            tile.connect("toggled", self.choose_theme, theme)
-            grid.attach(tile, column, row, 1, 1)
-            self.tiles[theme] = (tile, miniature, css)
-        gallery.add(grid)
+        if name == "clock":
+            faces = Adw.PreferencesGroup(title="Clock face")
+            page.add(faces)
+            tiles = Gtk.Box(spacing=10, homogeneous=True, halign=Gtk.Align.CENTER)
+            faces.add(tiles)
+            self.face_tiles = {}
+            for face, title in CLOCK_FACES.items():
+                tile = Gtk.ToggleButton()
+                tile.update_property([Gtk.AccessibleProperty.LABEL], [title])
+                if self.face_tiles:
+                    tile.set_group(self.face_tiles["en"][0])
+                content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+                sample = ClockPreview(238)
+                content.append(sample.widget)
+                content.append(Gtk.Label(label=title))
+                tile.set_child(content)
+                tile.connect("toggled", lambda item, value=face: self.edit(face=value) if item.get_active() else None)
+                tiles.append(tile)
+                self.face_tiles[face] = (tile, sample)
+
+        themes = Adw.PreferencesGroup(title="Theme")
+        page.add(themes)
+        self.apply_button, self.cancel_button = _actions(themes, self.apply, self.cancel)
+        self.themes = _choice(())
+        self.themes.connect("notify::selected", self.choose_theme)
+        self.theme_row = _row(themes, "Theme for this widget", self.themes)
+        save = Gtk.Button(label="Save as Custom")
+        save.set_sensitive(self.host.has_theme_library)
+        save.connect("clicked", self.save_theme)
+        _row(themes, "Add this appearance to Themes", save)
 
         preview = Adw.PreferencesGroup(title="Preview")
         page.add(preview)
-        if name == "ayah":
-            self.sample = AyahPreview(self.host.element(name))
-            preview.add(self.sample.widget)
-        else:
-            self.sample = Gtk.Label(wrap=True, justify=Gtk.Justification.CENTER, halign=Gtk.Align.CENTER)
-            self.css = Gtk.CssProvider()
-            self.sample.get_style_context().add_provider(self.css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
-            preview.add(self.sample)
+        self.sample = AyahPreview(self.host.element(name)) if name == "ayah" else ClockPreview()
+        preview.add(self.sample.widget)
 
         group = Adw.PreferencesGroup(title="Appearance")
-        if name == "ayah":
-            group.set_description("Editing a preset copies its appearance to Custom.")
+        group.set_description("Edits create a custom appearance for this widget.")
         page.add(group)
         self.transparency = _percentage()
-        if name == "ayah":
-            self.transparency.connect("value-changed", lambda control: self.edit(transparency=100 - round(control.get_value())))
-            _row(group, "Background opacity", self.transparency)
-            self.text_opacity = _percentage()
-            self.text_opacity.connect("value-changed", lambda control: self.edit(text_opacity=round(control.get_value())))
-            _row(group, "Text opacity", self.text_opacity)
-        else:
-            self.transparency.connect("value-changed", lambda control: self.edit(transparency=round(control.get_value())))
-            _row(group, "Box transparency", self.transparency, "100% leaves the wallpaper visible through the card.")
+        self.transparency.connect("value-changed", lambda control: self.edit(transparency=100 - round(control.get_value())))
+        _row(group, "Background and artwork opacity", self.transparency)
+        self.text_opacity = _percentage()
+        self.text_opacity.connect("value-changed", lambda control: self.edit(text_opacity=round(control.get_value())))
+        _row(group, "Text opacity", self.text_opacity)
 
         self.style = _choice(STYLES)
         _row(group, "Card style", self.style)
@@ -154,19 +157,18 @@ class CardPage:
             button.connect("notify::rgba", self.choose_color, field)
 
         available = {family.get_name() for family in PangoCairo.FontMap.get_default().list_families()}
-        theme_fonts = (values[-1] for values in THEMES[name].values())
+        theme_fonts = (preset["font"] for preset in THEMES[name].values())
         available.update(theme_fonts)
         self.fonts = ["", *sorted(available - {""}, key=lambda font: (font.casefold(), font))]
         self.font = _choice(("System font", *self.fonts[1:]))
         self.font.set_enable_search(True)
-        _row(group, "English font" if name == "ayah" else "Default font", self.font)
+        _row(group, "English font", self.font)
         self.font.connect("notify::selected", lambda dropdown, _: self.edit(font=self.fonts[dropdown.get_selected()]))
-        if name == "ayah":
-            self.arabic_fonts = ["", *AYAH_SPEC["arabic_fonts"]]
-            self.arabic_font = _choice(("Amiri (default)", *self.arabic_fonts[1:]))
-            _row(group, "Arabic font", self.arabic_font)
-            self.arabic_font.connect("notify::selected",
-                                     lambda dropdown, _: self.edit(arabic_font=self.arabic_fonts[dropdown.get_selected()]))
+        self.arabic_fonts = ["", *AYAH_SPEC["arabic_fonts"]]
+        self.arabic_font = _choice(("Theme default", *self.arabic_fonts[1:]))
+        _row(group, "Arabic font", self.arabic_font)
+        self.arabic_font.connect("notify::selected",
+                                 lambda dropdown, _: self.edit(arabic_font=self.arabic_fonts[dropdown.get_selected()]))
 
         self.size = Gtk.SpinButton.new_with_range(8, 48, 1)
         self.width = Gtk.SpinButton.new_with_range(
@@ -181,12 +183,61 @@ class CardPage:
         _row(group, "Box width", self.width, "Pixels")
         self.size.connect("value-changed", lambda control: self.edit(size=control.get_value_as_int()))
         self.width.connect("value-changed", lambda control: self.edit(width=control.get_value_as_int()))
+        self.refresh_themes()
+
+    def refresh_themes(self):
+        self.library = self.host.custom_themes()
+        self.theme_names = ["Custom", *THEMES[self.name], *self.library]
+        labels = [f"{theme} A" if self.name == "clock" and theme in THEME_FAMILIES else theme
+                  for theme in self.theme_names]
+        self.refreshing = True
+        self.themes.set_model(Gtk.StringList.new(labels))
+        self.refreshing = False
         self.render()
 
-    def choose_theme(self, button, theme):
-        if not self.refreshing and button.get_active():
-            self.editor.select_theme(theme)
-            self.render()
+    def choose_theme(self, dropdown, _):
+        if not self.refreshing and dropdown.get_selected() < len(self.theme_names):
+            self.select_theme(self.theme_names[dropdown.get_selected()])
+
+    def select_theme(self, theme):
+        try:
+            if theme in self.library:
+                self.editor.select_custom(theme, self.library[theme])
+            else:
+                self.editor.select_theme(theme)
+        except ValueError as exc:
+            self.notify(str(exc))
+        self.render()
+
+    def save_theme(self, _):
+        dialog = Adw.MessageDialog(
+            transient_for=self.window, heading="Save a custom theme",
+            body="Your theme will be available to both the Clock and Ayah reminder.",
+        )
+        entry = Gtk.Entry(placeholder_text="Theme name", activates_default=True)
+        dialog.set_extra_child(entry)
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("save", "Save")
+        dialog.set_default_response("save")
+        dialog.set_close_response("cancel")
+        dialog.set_response_appearance("save", Adw.ResponseAppearance.SUGGESTED)
+
+        def save(_dialog, response):
+            if response != "save":
+                return
+            try:
+                name = self.host.save_custom_theme(entry.get_text(), self.name, self.editor.draft)
+            except (HostError, ValueError, GLib.Error) as exc:
+                self.notify(str(exc))
+                return
+            for page in self.window.cards.values():
+                page.refresh_themes()
+            self.select_theme(name)
+            self.notify(f"Saved {name} to Themes")
+
+        dialog.connect("response", save)
+        dialog.present()
+        entry.grab_focus()
 
     def choose_color(self, button, _, field):
         rgba = button.get_rgba()
@@ -206,25 +257,27 @@ class CardPage:
         self.refreshing = True
         try:
             card = self.editor.draft
-            for theme, (button, label, css) in self.tiles.items():
-                button.set_active(theme == self.editor.theme)
-                if css:
-                    tile_card = self.editor.custom if theme == "Custom" else theme_preview(self.name, theme, card)
-                    self.render_sample(tile_card, label, css, miniature=True)
-                elif theme == "Custom":
-                    thumbnail(self.editor.custom, overlay=label)
-            self.transparency.set_value(100 - card.transparency if self.name == "ayah" else card.transparency)
+            selected = card.custom_name if card.custom_name in self.library else self.editor.theme
+            self.themes.set_selected(self.theme_names.index(selected) if selected in self.theme_names else 0)
+            if self.name == "clock":
+                for face, (tile, preview) in self.face_tiles.items():
+                    tile.set_active(card.face == face)
+                    preview.render(replace(card, face=face))
+            design = DESIGNS.get(card.clock_design)
+            if self.name == "clock" and design:
+                self.theme_row.set_subtitle(design["story"])
+            self.transparency.set_value(100 - card.transparency)
+            self.text_opacity.set_value(card.text_opacity)
             self.style.set_selected(STYLES.index(card.style))
             if card.font not in self.fonts:
                 self.fonts.append(card.font)
                 self.font.get_model().append(card.font)
             self.font.set_selected(self.fonts.index(card.font))
+            if card.arabic_font not in self.arabic_fonts:
+                self.arabic_fonts.append(card.arabic_font)
+                self.arabic_font.get_model().append(card.arabic_font)
+            self.arabic_font.set_selected(self.arabic_fonts.index(card.arabic_font))
             if self.name == "ayah":
-                self.text_opacity.set_value(card.text_opacity)
-                if card.arabic_font not in self.arabic_fonts:
-                    self.arabic_fonts.append(card.arabic_font)
-                    self.arabic_font.get_model().append(card.arabic_font)
-                self.arabic_font.set_selected(self.arabic_fonts.index(card.arabic_font))
                 self.arabic_size.set_value(card.arabic_size)
             self.size.set_value(card.size)
             self.width.set_value(card.width)
@@ -233,45 +286,16 @@ class CardPage:
                 rgba = Gdk.RGBA()
                 rgba.parse(getattr(card, field))
                 button.set_rgba(rgba)
-            if self.name == "ayah":
-                self.sample.render(card)
-            else:
-                self.render_sample(card, self.sample, self.css)
-                self.sample.set_size_request(max(180, min(490, round(card.width / 1.7))), -1)
+            self.sample.render(card)
             self.apply_button.set_sensitive(self.editor.dirty)
             self.cancel_button.set_sensitive(self.editor.dirty)
         finally:
             self.refreshing = False
 
-    def render_sample(self, card, label, css, miniature=False):
-        radius, border = CARD_STYLES[card.style]
-        # Swatches retain enough fill to identify a palette when the selected card is fully transparent.
-        opacity = max(0.82, card.opacity) if miniature else card.opacity
-        padding = 5 if miniature else 12
-        css.load_from_string(
-            f"label {{ background-color: alpha({card.background}, {opacity}); color: {card.text}; "
-            f"border: {border}px solid {card.accent}; border-radius: {radius}px; padding: {padding}px; }}"
-        )
-        now = datetime.now()
-        time = "16:40" if miniature else f"{now:%H:%M:%S}"
-        size = 20 if miniature else card.size + 16
-        date = "Wednesday, 18 November" if miniature else escape(now.strftime("%A, %d %B"))
-        content = (
-            f'<span size="{size}pt">{time}</span>\n'
-            f'<span size="{8 if miniature else card.size}pt">{date}</span>\n'
-            f'<span foreground="{card.accent}">━━━━━━━</span>'
-            f'<span foreground="{card.accent}" alpha="35%">━━━</span>'
-        )
-        if not miniature:
-            content += '\n<small>Day progress</small>'
-        if card.font:
-            content = f'<span font_family="{escape(card.font, quote=True)}">{content}</span>'
-        label.set_markup(content)
-
     def apply(self):
         try:
             current = self.host.apply_card(self.name, self.editor.saved, self.editor.changes())
-            custom = self.host.card(self.name, custom=True) if self.name == "ayah" and current.theme != "Custom" else None
+            custom = self.host.card(self.name, custom=True) if current.theme != "Custom" else None
         except (HostError, ValueError, GLib.Error) as exc:
             self.notify(str(exc))
             return
@@ -281,13 +305,165 @@ class CardPage:
 
     def cancel(self):
         try:
-            custom = self.host.card(self.name, custom=True) if self.name == "ayah" else None
+            custom = self.host.card(self.name, custom=True)
             options = self.host.ayah_preset_options() if self.name == "ayah" else None
             self.editor.cancel(self.host.card(self.name), custom, options)
         except (HostError, GLib.Error) as exc:
             self.notify(str(exc))
             return
         self.render()
+
+
+class ThemesPage:
+    def __init__(self, page, window):
+        self.window = window
+        self.group = Adw.PreferencesGroup(title="Theme library")
+        page.add(self.group)
+        self.rows = []
+
+    def refresh(self):
+        for row in self.rows:
+            self.group.remove(row)
+        self.rows.clear()
+        for family in THEME_FAMILIES:
+            self.add_theme(family, DESIGNS[family]["family_story"])
+        if self.window.host:
+            for name, snapshot in self.window.host.custom_themes().items():
+                self.add_theme(name, f"Saved from {WIDGETS[snapshot['widget']]}", snapshot)
+
+    def add_theme(self, name, story, snapshot=None):
+        row = Adw.ActionRow(title=name, subtitle=story, activatable=True, use_markup=False)
+        row.add_suffix(Gtk.Image.new_from_icon_name("go-next-symbolic"))
+        row.connect("activated", lambda _: ThemeWindow(self.window, name, snapshot).present())
+        self.group.add(row)
+        self.rows.append(row)
+
+
+class ThemeWindow(Adw.Window):
+    def __init__(self, owner, name, snapshot):
+        super().__init__(transient_for=owner, modal=True, title=name, default_width=1020, default_height=580)
+        self.owner = owner
+        self.name = name
+        self.snapshot = snapshot
+        self.saved = {widget: page.host.card(widget) for widget, page in owner.cards.items()}
+        initial = self.saved.get("clock") or self.saved.get("ayah") or Card()
+        if snapshot:
+            initial = custom_preview(snapshot["widget"], snapshot, initial)
+
+        toolbar = Adw.ToolbarView()
+        header = Adw.HeaderBar()
+        header.set_title_widget(Adw.WindowTitle(title=name))
+        toolbar.add_top_bar(header)
+        self.set_content(toolbar)
+        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=15, margin_top=16, margin_bottom=16,
+                       margin_start=20, margin_end=20)
+        scroll = Gtk.ScrolledWindow(child=body, hscrollbar_policy=Gtk.PolicyType.NEVER)
+        toolbar.set_content(scroll)
+
+        targets = {"both": "Both", "clock": "Clock", "ayah": "Ayah"}
+        self.targets = _toggle_group(body, targets, self.render)
+        self.targets["both"].set_active(True)
+        self.variants = {}
+        if not snapshot:
+            self.variants = _toggle_group(body, {0: "Variant A", 1: "Variant B"}, self.render)
+            self.variants[0].set_active(True)
+
+        previews = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE, row_spacing=12, column_spacing=12,
+                               min_children_per_line=1, max_children_per_line=3, homogeneous=True,
+                               halign=Gtk.Align.CENTER, valign=Gtk.Align.START)
+        body.append(previews)
+        self.panels = {}
+        for key, title, sample in (
+            ("ayah", WIDGETS["ayah"], AyahPreview(width=294)),
+            ("en", "English clock", ClockPreview(294)),
+            ("ar", "الساعة بالعربية", ClockPreview(294)),
+        ):
+            panel = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, valign=Gtk.Align.START)
+            heading = Gtk.Label(label=title, wrap=True)
+            heading.set_size_request(-1, 30)
+            heading.add_css_class("heading")
+            panel.append(heading)
+            panel.append(sample.widget)
+            story = Gtk.Label(wrap=True, justify=Gtk.Justification.CENTER)
+            story.add_css_class("dim-label")
+            panel.append(story)
+            previews.append(panel)
+            self.panels[key] = (sample, story, panel.get_parent())
+
+        controls = Adw.PreferencesGroup(title="Opacity", halign=Gtk.Align.CENTER)
+        controls.set_size_request(570, -1)
+        body.append(controls)
+        self.background = _percentage()
+        self.background.set_value(100 - initial.transparency)
+        _row(controls, "Background and artwork", self.background)
+        self.text = _percentage()
+        self.text.set_value(initial.text_opacity)
+        _row(controls, "Text", self.text)
+        for scale in (self.background, self.text):
+            scale.connect("value-changed", lambda _: self.render())
+
+        self.apply_button = Gtk.Button(label="Apply theme")
+        self.apply_button.add_css_class("suggested-action")
+        self.apply_button.connect("clicked", self.apply)
+        header.pack_end(self.apply_button)
+        self.error = Gtk.Label(wrap=True, xalign=0)
+        self.error.add_css_class("error")
+        body.append(self.error)
+        self.render()
+
+    def selection(self):
+        target = next((key for key, button in self.targets.items() if button.get_active()), "both")
+        return ("ayah", "clock") if target == "both" else (target,)
+
+    def card(self, widget):
+        base = self.saved.get(widget, Card())
+        if self.snapshot:
+            card = replace(custom_preview(widget, self.snapshot, base), custom_name=self.name)
+        else:
+            variant = int(self.variants[1].get_active())
+            name = THEME_FAMILIES[self.name][widget][variant]
+            card = theme_preview(widget, name, base)
+        return fit_card_dimensions(replace(card, transparency=100 - round(self.background.get_value()),
+                                           text_opacity=round(self.text.get_value())))
+
+    def render(self):
+        if not hasattr(self, "text"):
+            return
+        widgets = self.selection()
+        self.apply_button.set_sensitive(all(widget in self.saved for widget in widgets))
+        self.error.set_label("")
+        for key, (preview, story, panel) in self.panels.items():
+            widget = "ayah" if key == "ayah" else "clock"
+            panel.set_visible(widget in widgets)
+            if widget not in widgets:
+                continue
+            card = self.card(widget)
+            if widget == "clock":
+                card = replace(card, face=key)
+                description = DESIGNS[card.clock_design]["story"]
+            else:
+                description = AYAH_PRESETS.get(card.art_theme, {}).get("story", "")
+            preview.render(card)
+            story.set_label(description)
+
+    def apply(self, _):
+        updates = {}
+        for widget in self.selection():
+            editor = CardEditor(widget, self.saved[widget])
+            editor.draft = self.card(widget)
+            updates[widget] = (editor.saved, editor.changes())
+        try:
+            applied = self.owner.host.apply_cards(updates)
+        except (HostError, ValueError, GLib.Error) as exc:
+            self.error.set_label(str(exc))
+            return
+        for widget, card in applied.items():
+            page = self.owner.cards[widget]
+            options = self.owner.host.ayah_preset_options() if widget == "ayah" else None
+            page.editor.cancel(card, self.owner.host.card(widget, custom=True), options)
+            page.refresh_themes()
+        self.owner.notify(f"Applied {self.name}")
+        self.close()
 
 
 class PlacementPage:
@@ -383,10 +559,11 @@ class PlacementPage:
 
 class SettingsWindow(Adw.ApplicationWindow):
     def __init__(self, application, host, host_message):
-        super().__init__(application=application, title="Desktop Widgets", default_width=940, default_height=720)
+        super().__init__(application=application, title="Desktop Widgets", default_width=940, default_height=800)
         self.set_size_request(SETTINGS_MIN_WIDTH, -1)
         self.host = host
         self.switches = {}
+        self.cards = {}
         self.toast = Adw.ToastOverlay()
         toolbar = Adw.ToolbarView()
         toolbar.add_top_bar(Adw.HeaderBar())
@@ -403,6 +580,7 @@ class SettingsWindow(Adw.ApplicationWindow):
 
         pane = Gtk.Box(hexpand=True, vexpand=True)
         stack = Gtk.Stack(hexpand=True, vexpand=True)
+        self.stack = stack
         sidebar = Gtk.StackSidebar(stack=stack, width_request=156)
         pane.append(sidebar)
         pane.append(Gtk.Separator(orientation=Gtk.Orientation.VERTICAL))
@@ -431,9 +609,15 @@ class SettingsWindow(Adw.ApplicationWindow):
                 general.set_description("The avatar can stand on the clock when both are on the same display.")
             else:
                 try:
-                    CardPage(page, name, self)
+                    self.cards[name] = CardPage(page, name, self)
                 except (HostError, GLib.Error) as exc:
                     general.set_description(str(exc))
+
+        page = Adw.PreferencesPage()
+        stack.add_titled(page, "themes", "Themes")
+        self.themes_page = ThemesPage(page, self)
+        stack.connect("notify::visible-child-name", lambda *_: self.themes_page.refresh()
+                      if stack.get_visible_child_name() == "themes" else None)
 
         names = [name for name in WIDGETS if name in visible]
         page = Adw.PreferencesPage()

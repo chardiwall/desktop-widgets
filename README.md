@@ -31,11 +31,17 @@ Build and install from the repository root. The commands stop at the first failu
 
 ```sh
 sh packaging/build-deb.sh &&
-  sudo apt install --reinstall "./dist/desktop-widget-settings_0.4.0_$(dpkg --print-architecture).deb" &&
+  sudo apt install --reinstall "./dist/desktop-widget-settings_0.6.5_$(dpkg --print-architecture).deb" &&
   desktop-widget-settings --install-gnome-integration
 ```
 
 The last command backs up a local AzClock 16.1 installation and transfers ownership from the legacy desktop avatar service. Log out and back in to load the bridge. The GNOME configuration needs the existing widget IDs `ayah/verse`, `clock/card` and `avatar/body`. For development, use the [isolated preview and checks](docs/avatar-pilot.md#verification).
+
+## Clock faces and themes
+
+In **Clock**, choose the face language before choosing a theme. The English face places the avatar on the right of the clock. The Arabic face uses Arabic numerals and right-to-left text and places the avatar on the left.
+
+Open a family in **Themes** to preview its A and B illustrations. **Both** shows the Ayah and the English and Arabic clock faces together. Choose **Clock** or **Ayah** to apply to one widget. Adjust the artwork and text opacity before applying. The Clock and Ayah illustrations tell separate parts of the same story. Each widget’s appearance editor can save a named custom theme to the library.
 
 ## Ayah screenshot check
 

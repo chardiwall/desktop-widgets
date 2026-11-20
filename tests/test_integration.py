@@ -78,6 +78,7 @@ class IntegrationPatchTest(unittest.TestCase):
         self.assertIn(MARKER, patched)
         self.assertIn(PANEL_MARKER, patched)
         self.assertIn("element._ayahCard = decorateAyah(this, element, elementSettings);", patched)
+        self.assertIn(integration.CLOCK_ATTACH, patched)
         self.assertIn("this._widgetIndicator?.displayedWidgets(widgetIds)", patched)
         self.assertNotIn(integration.LEGACY_AVATAR_MARKER, patched)
         self.assertIn("this.widgets.has('avatar')", patched)
@@ -226,6 +227,13 @@ class InstallationFailureTest(unittest.TestCase):
             with self.assertRaises(subprocess.CalledProcessError):
                 integration.install_bridge()
         self.assert_previous_bundle()
+
+    def test_install_clears_the_retired_light_state(self):
+        state = Path.home() / ".config/desk-light/state"
+        state.parent.mkdir(parents=True)
+        state.write_bytes(b"on\n")
+        integration.install_bridge()
+        self.assertEqual(state.read_bytes(), b"off\n")
 
     def test_failed_activation_preserves_active_entry_and_assets(self):
         replace_file = integration._replace_file

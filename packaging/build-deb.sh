@@ -2,7 +2,7 @@
 set -eu
 
 cd "$(dirname "$0")/.."
-version=0.4.0
+version=0.6.5
 package=desktop-widget-settings
 architecture=$(dpkg-architecture -qDEB_HOST_ARCH)
 multiarch=$(dpkg-architecture -qDEB_HOST_MULTIARCH)
@@ -15,9 +15,24 @@ library="$staging/usr/lib/$package"
 install -d "$staging/DEBIAN" "$library/desktop_widgets"
 for file in desktop_widgets/*.py desktop_widgets/bridge/*.py desktop_widgets/bridge/*.js \
     desktop_widgets/widgets/ayah/*.py desktop_widgets/widgets/ayah/*.js desktop_widgets/widgets/ayah/*.json \
-    desktop_widgets/widgets/ayah/art/* desktop_widgets/widgets/clock/*.py desktop_widgets/widgets/avatar/*.js; do
+    desktop_widgets/widgets/clock/*.py desktop_widgets/widgets/clock/*.js \
+    desktop_widgets/widgets/clock/*.json desktop_widgets/widgets/avatar/*.js; do
     install -D -m 644 "$file" "$library/$file"
 done
+/usr/bin/python3 - "$library" <<'PYTHON'
+from pathlib import Path
+from shutil import copyfile
+import sys
+
+from desktop_widgets.settings import theme_art_paths
+
+library = Path(sys.argv[1])
+for path in theme_art_paths():
+    source = Path("desktop_widgets") / path
+    destination = library / source
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    copyfile(source, destination)
+PYTHON
 for font in desktop_widgets/widgets/ayah/fonts/*/*.ttf; do
     family=$(basename "$(dirname "$font")")
     install -D -m 644 "$font" "$staging/usr/share/fonts/truetype/desktop-widgets/$(basename "$font")"
@@ -49,7 +64,7 @@ Architecture: $architecture
 Section: x11
 Priority: optional
 Maintainer: Desktop Widgets contributors
-Depends: libc6, libgcc-s1, libstdc++6, libglib2.0-0t64, python3, python3-gi, gir1.2-gtk-4.0 (>= 4.10), gir1.2-adw-1 (>= 1.6), gir1.2-pango-1.0, libgstreamer1.0-0, gstreamer1.0-plugins-base, gstreamer1.0-plugins-good
+Depends: libc6, libgcc-s1, libstdc++6, libglib2.0-0t64, python3, python3-gi, gjs, gir1.2-gtk-4.0 (>= 4.10), gir1.2-adw-1 (>= 1.6), gir1.2-pango-1.0, libgstreamer1.0-0, gstreamer1.0-plugins-base, gstreamer1.0-plugins-good
 Description: Settings for an existing GNOME desktop widget setup
  Control the Ayah reminder, Clock and Avatar configured in AzClock.
  Set themes, colours, display and position for the Ayah and Clock cards.
